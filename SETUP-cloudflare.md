@@ -77,7 +77,7 @@ If you see an error page, double-check that you pasted the entire `cloudflare-wo
 
 ## Step 5 — Plug the worker URL into your tracker
 
-1. Open `brick-tracker.html` in a text editor (right-click → Open with → Notepad / TextEdit)
+1. Open `index.html` in a text editor (right-click → Open with → Notepad / TextEdit)
 2. Near the top of the file, find this line:
 
    ```js
@@ -91,7 +91,7 @@ If you see an error page, double-check that you pasted the entire `cloudflare-wo
    ```
 
 4. **Save the file.**
-5. **Double-click `brick-tracker.html`** to open it in your browser.
+5. **Double-click `index.html`** to open it in your browser.
 
 The status dot in the top right should turn **green** and say **LIVE** within a few seconds. Done.
 
@@ -118,13 +118,13 @@ The `workers.dev` URL works fine forever. But if you'd rather have something lik
 - Try opening `https://YOUR-WORKER-URL/v2/reg/N732HM` directly in your browser. If that doesn't show JSON, the worker isn't deployed correctly — redo Step 3.
 
 **"I get HTTP 429 errors after a while"**
-- This is a rate limit from either Cloudflare or adsb.lol. The default 3-second polling shouldn't trigger this for normal use. If it does, open `brick-tracker.html` and find `refreshIntervalMs: 3000` — change `3000` to `5000` (5 seconds) or `10000` (10 seconds).
+- This is a rate limit from either Cloudflare or adsb.lol. The default 3-second polling shouldn't trigger this for normal use. If it does, open `index.html` and find `refreshIntervalMs: 3000` — change `3000` to `5000` (5 seconds) or `10000` (10 seconds).
 
 **"My worker URL gives 'Worker threw exception'"**
 - Open the worker in the Cloudflare dashboard → click **Logs** → look at the most recent log to see what went wrong. Most likely cause: the code didn't paste in completely.
 
 **"How do I update the tracker later?"**
-- Just edit `brick-tracker.html` and re-open it. The worker keeps running by itself — you don't have to touch it again.
+- Just edit `index.html` and re-open it. The worker keeps running by itself — you don't have to touch it again.
 
 **"What if I want to add more aircraft later?"**
-- Open `brick-tracker.html`, find the `FLEET` section near the top, and add another entry. Same pattern as before — no Cloudflare changes needed.
+- Open `index.html`, find the `FLEET` section near the top, and add another entry. Same pattern as before — no Cloudflare changes needed.
