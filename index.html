@@ -314,7 +314,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0017</div>
+  <div id="version">v.0018</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -503,7 +503,7 @@ function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   const line1=line1Parts.length?`<div class="ac-meta" style="${colorVar}">${line1Parts.join(" - ")}</div>`:"";
   const line2=line2Parts.length?`<div class="ac-meta" style="${colorVar}">${line2Parts.join(" · ")}</div>`:"";
   const html=`<div class="ac-wrap" style="${colorVar} transform: rotate(${rotation}deg);">${iconMarkup}</div><div class="ac-label" style="${colorVar}">${label}</div>${line1}${line2}`;
-  return L.divIcon({className:classes.join(" "),html,iconSize:[48,64],iconAnchor:[24,24]});
+  return L.divIcon({className:classes.join(" "),html,iconSize:[48,64],iconAnchor:[24,16]});
 }
 
 function popupHtml(ac,fleetCfg,primaryAc,isBase,fromLabel){
