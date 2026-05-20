@@ -208,6 +208,8 @@ const SETTINGS = {
   .pop-row span { color: var(--c-muted); letter-spacing: .15em; font-size: 10px; }
   .pop-row b { color: var(--c-text); font-weight: 500; }
 
+  #version { position: fixed; bottom: 6px; left: 6px; z-index: 1000; font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; color: var(--c-muted); background: rgba(10,14,26,.8); padding: 3px 8px; border: 1px solid var(--c-border); pointer-events: none; }
+
   @media (max-width: 800px) {
     #app { grid-template-columns: 1fr; grid-template-rows: 48px 1fr 280px; grid-template-areas: "topbar" "map" "panel"; }
     #panel { border-left: none; border-top: 1px solid var(--c-border); }
@@ -284,6 +286,9 @@ const SETTINGS = {
       </footer>
     </aside>
   </div>
+
+  <!-- VERSION — bump before every commit -->
+  <div id="version">v.0001</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
