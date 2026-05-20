@@ -28,7 +28,7 @@ After logging in:
 2. Click the **Create** button (top right)
 3. Choose **Workers** → **Create Worker** (sometimes labeled "Hello World" — that's fine)
 4. You'll see a screen with a randomly-generated name like `wandering-fog-1a2b`
-5. **Optional but recommended:** rename it to something like `brick-adsb-proxy`
+5. **Optional but recommended:** rename it to something like `hems-adsb-proxy`
 6. Click **Deploy** (this deploys the default placeholder code — we'll replace it next)
 
 ---
@@ -52,7 +52,7 @@ After deploying, you'll see a "Success!" screen.
 After deploying, you'll see a URL near the top of the page that looks something like:
 
 ```
-https://brick-adsb-proxy.your-username.workers.dev
+https://hems-adsb-proxy.your-username.workers.dev
 ```
 
 **Copy that URL.** This is your worker's address.
@@ -60,7 +60,7 @@ https://brick-adsb-proxy.your-username.workers.dev
 To test it works, paste this URL into your browser's address bar, **but add `/v2/reg/N732HM` to the end**, so it looks like:
 
 ```
-https://brick-adsb-proxy.your-username.workers.dev/v2/reg/N732HM
+https://hems-adsb-proxy.your-username.workers.dev/v2/reg/N732HM
 ```
 
 Press Enter. You should see something like:
@@ -87,7 +87,7 @@ If you see an error page, double-check that you pasted the entire `cloudflare-wo
 3. Paste your worker URL between the quotes. Make sure there is **no trailing slash**:
 
    ```js
-   const WORKER_URL = "https://brick-adsb-proxy.your-username.workers.dev";
+   const WORKER_URL = "https://hems-adsb-proxy.your-username.workers.dev";
    ```
 
 4. **Save the file.**
@@ -99,7 +99,7 @@ The status dot in the top right should turn **green** and say **LIVE** within a 
 
 ## Optional: use your own domain (e.g., GoDaddy)
 
-The `workers.dev` URL works fine forever. But if you'd rather have something like `traffic.brick-ops.com`, here's how:
+The `workers.dev` URL works fine forever. But if you'd rather have something like `traffic.your-domain.com`, here's how:
 
 1. **Buy a domain** from any registrar (GoDaddy is fine; Cloudflare itself sells them at cost which is usually cheaper)
 2. In the Cloudflare dashboard, click **Websites** → **Add a site** → enter your domain

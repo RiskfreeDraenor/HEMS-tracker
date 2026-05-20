@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-  <title>BRICK TRAFFIC WATCH</title>
+  <title>HEMS TRACKER</title>
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='12' r='3' fill='%23FFB800'/%3E%3Cline x1='2' y1='12' x2='22' y2='12' stroke='%23FFB800' stroke-width='1.5'/%3E%3Cline x1='12' y1='2' x2='12' y2='22' stroke='%23FFB800' stroke-width='1.5'/%3E%3C/svg%3E" />
 
   <!-- Leaflet map library (loaded from the internet) -->
@@ -22,7 +22,7 @@
    PASTE YOUR CLOUDFLARE WORKER URL HERE (see SETUP-cloudflare.md).
    Without this, the page can't reliably reach adsb.lol from a browser.
 
-   Example:  "https://brick-adsb-proxy.yourname.workers.dev"
+   Example:  "https://hems-adsb-proxy.yourname.workers.dev"
    Make sure there is NO trailing slash.
 ------------------------------------------------------------------*/
 const WORKER_URL = "https://hemstracker.deltasteelfox92.workers.dev";
@@ -34,20 +34,31 @@ const WORKER_URL = "https://hemstracker.deltasteelfox92.workers.dev";
 ------------------------------------------------------------------*/
 const FLEET = [
   {
-    registration: "N732HM",      // tail number
-    label:        "732HM",       // short name shown on map
-    color:        "#FFB800",     // hex color
-    isPrimary:    true,          // map centers on this one
-    kind:         "helicopter",  // "helicopter" or "fixed-wing"
+    registration: "N732HM",          // tail number
+    label:        "Hackensack 2",    // callsign / short name shown on map
+    color:        "#0080ff",         // ONE color per company — copy this onto every other helo from the same company
+    isPrimary:    true,              // trail/clock/altitude features use this one
+    kind:         "helicopter",      // "helicopter" or "fixed-wing"
+    company:      "Hackensack",
+    base: { lat: 40.078262, lon: -74.132108, name: "Outpatient Parking, Brick Township, NJ 08724" },
+  },
+  {
+    registration: "N551HU",
+    label:        "Hackensack 1",
+    color:        "#0080ff",
+    kind:         "helicopter",
+    company:      "Hackensack",
+    base: { lat: 41.1327789, lon: -74.3405939, name: "126 Airport Rd #7, West Milford, NJ 07480" },
   },
 
-  // EXAMPLE — uncomment and edit to add a second aircraft:
+  // EXAMPLE — uncomment and edit to add another aircraft:
   // {
   //   registration: "N456AB",
   //   label:        "456AB",
-  //   color:        "#00FF9D",
-  //   isPrimary:    false,
+  //   color:        "#FFB800",      // same as other "Default"-company helos
   //   kind:         "helicopter",
+  //   company:      "Default",
+  //   base: { lat: 40.0123, lon: -74.4567, name: "Trenton Helipad" },
   // },
 ];
 
@@ -56,7 +67,7 @@ const FLEET = [
    Replace with your exact helipad coordinates if you have them.
 ------------------------------------------------------------------*/
 const BASE_LOCATION = {
-  name: "Brick Township, NJ",
+  name: "Base",
   lat:  40.0581,
   lon: -74.1099,
 };
@@ -73,7 +84,7 @@ const SETTINGS = {
   rangeRingCount: 4,
   includeGroundTraffic: false,     // show parked aircraft?
   nearbyAltDisplayFt: 5000,        // show altitude on traffic markers within this vertical separation from primary
-  defaultMaxAltFt: 30000,          // initial value for altitude filter slider
+  defaultMaxAltFt:  1000,          // initial value for altitude filter slider
   minMaxAltFt:       500,
   maxMaxAltFt:     30000,
   trailMaxPoints:    200,          // ~10 min of breadcrumbs at 3s polling
@@ -128,7 +139,11 @@ const SETTINGS = {
   .section-title { font-size: 10px; letter-spacing: .25em; color: var(--c-muted); margin: 0 0 10px; display: flex; align-items: center; justify-content: space-between; }
   .section-title .count { color: var(--c-text); background: var(--c-surface); padding: 2px 8px; border-radius: 2px; letter-spacing: 0; font-size: 11px; }
 
-  .fleet-card { background: var(--c-surface); border: 1px solid var(--c-border); border-left: 3px solid var(--ac-color, var(--c-fleet)); padding: 10px 12px; margin-bottom: 8px; position: relative; }
+  .company-group { margin-bottom: 14px; }
+  .company-group:last-child { margin-bottom: 0; }
+  .company-header { font-size: 10px; font-weight: 600; letter-spacing: .25em; color: var(--c-muted); margin: 0 0 6px; padding: 0 0 5px; border-bottom: 1px solid var(--c-border); text-transform: uppercase; }
+  .fleet-card { background: var(--c-surface); border: 1px solid var(--c-border); border-left: 3px solid var(--ac-color, var(--c-fleet)); padding: 10px 12px; margin-bottom: 8px; position: relative; cursor: pointer; transition: background .12s ease; }
+  .fleet-card:hover { background: var(--c-surface-2); }
   .fleet-card:last-child { margin-bottom: 0; }
   .fleet-card.offline { border-left-color: var(--c-dim); opacity: .65; }
   .fc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -179,7 +194,7 @@ const SETTINGS = {
   #footer .update b { color: var(--c-text); font-weight: 500; }
 
   .ac-marker { pointer-events: auto; }
-  .ac-wrap { width: 24px; height: 24px; margin: 0 auto; transition: transform .35s ease-out; }
+  .ac-wrap { width: 32px; height: 32px; margin: 0 auto; transition: transform .35s ease-out; }
   .ac-svg { width: 100%; height: 100%; overflow: visible; }
   .ac-body { fill: var(--ac-color); stroke: var(--c-bg); stroke-width: 0.6; filter: drop-shadow(0 0 3px var(--ac-color)); }
   .ac-rotor { stroke: var(--ac-color); stroke-width: 1.4; stroke-linecap: round; opacity: .65; }
@@ -192,8 +207,10 @@ const SETTINGS = {
   .ac-fleet .ac-wrap { filter: drop-shadow(0 0 6px var(--ac-color)); }
   .ac-ground .ac-body { opacity: .45; }
   .ac-ground .ac-rotor, .ac-ground .ac-tail { opacity: .3; }
+  .ac-base .ac-wrap { filter: none; opacity: 0.55; }
+  .ac-base .ac-label { opacity: 0.7; }
   .ac-near .ac-body { animation: near-flash 1.2s ease-in-out infinite; }
-  .ac-near::before { content: ""; position: absolute; left: 50%; top: 50%; width: 36px; height: 36px; transform: translate(-50%,-50%);
+  .ac-near::before { content: ""; position: absolute; left: 50%; top: 50%; width: 44px; height: 44px; transform: translate(-50%,-50%);
     border: 1.5px solid var(--c-warn); border-radius: 50%; animation: near-ring 1.6s ease-out infinite; pointer-events: none; }
   @keyframes near-flash { 0%,100% { filter: drop-shadow(0 0 3px var(--ac-color)); } 50% { filter: drop-shadow(0 0 10px var(--c-warn)); } }
   @keyframes near-ring { 0% { opacity: .9; transform: translate(-50%,-50%) scale(.7); } 100% { opacity: 0; transform: translate(-50%,-50%) scale(1.8); } }
@@ -220,7 +237,7 @@ const SETTINGS = {
   <div id="app">
     <header id="topbar">
       <div class="brand">
-        <span class="mark">◉ BRICK TRAFFIC WATCH</span>
+        <span class="mark">◉ HEMS TRACKER</span>
         <span class="sub">N732HM · OPERATIONS</span>
       </div>
       <div class="statusline">
@@ -244,7 +261,7 @@ const SETTINGS = {
         <input type="range" id="radius-slider" />
         <div class="radius-row" style="margin-top:10px;">
           <label for="alt-slider">MAX ALTITUDE</label>
-          <span id="alt-readout">30,000 ft</span>
+          <span id="alt-readout">1,000 ft</span>
         </div>
         <input type="range" id="alt-slider" />
         <div class="btn-row">
@@ -288,7 +305,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0001</div>
+  <div id="version">v.0011</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -436,45 +453,57 @@ const ringsLayer=L.layerGroup().addTo(map);
 const trailsLayer=L.layerGroup().addTo(map);
 const markerByHex=new Map();
 
-const HELI_SVG=`<svg viewBox="-12 -12 24 24" class="ac-svg"><rect x="-0.7" y="3" width="1.4" height="6" class="ac-body"/><line x1="-2.5" y1="9.2" x2="2.5" y2="9.2" class="ac-tail"/><ellipse cx="0" cy="-1" rx="3.2" ry="4.5" class="ac-body"/><ellipse cx="0" cy="-1" rx="11" ry="1.8" class="ac-rotor" fill="none"/></svg>`;
+const HELI_SVG=`<svg viewBox="-12 -12 24 24" class="ac-svg"><line x1="-9" y1="-9" x2="9" y2="9" class="ac-rotor" stroke-width="1.2"/><line x1="9" y1="-9" x2="-9" y2="9" class="ac-rotor" stroke-width="1.2"/><rect x="-0.8" y="3" width="1.6" height="6" class="ac-body"/><rect x="-2.6" y="8.5" width="5.2" height="1" class="ac-body"/><rect x="-5" y="-1" width="2.5" height="2.5" class="ac-body"/><rect x="2.5" y="-1" width="2.5" height="2.5" class="ac-body"/><rect x="-2.6" y="-3" width="5.2" height="6" rx="1" class="ac-body"/><ellipse cx="0" cy="-4" rx="1.8" ry="2.5" class="ac-body"/></svg>`;
 const PLANE_SVG=`<svg viewBox="-12 -12 24 24" class="ac-svg"><path d="M0,-10 L2.2,-4 L10,2 L10,4 L2,3 L1.5,8 L4,10 L4,11 L0,10 L-4,11 L-4,10 L-1.5,8 L-2,3 L-10,4 L-10,2 L-2.2,-4 Z" class="ac-body"/></svg>`;
 const UNKNOWN_SVG=`<svg viewBox="-12 -12 24 24" class="ac-svg"><circle cx="0" cy="0" r="5" class="ac-body" fill="none" stroke-width="2"/></svg>`;
 
-function buildIcon({ac,fleetCfg,isNear,primaryAc}){
+function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   const isHeli=fleetCfg?.kind==="helicopter"||(fleetCfg?.kind==="auto"&&ac.category==="A7")||(!fleetCfg&&ac.category==="A7");
   const svg=fleetCfg?(isHeli?HELI_SVG:PLANE_SVG):ac.category==="A7"?HELI_SVG:ac.category&&ac.category.startsWith("A")?PLANE_SVG:UNKNOWN_SVG;
   const classes=["ac-marker"];
   if(fleetCfg)classes.push("ac-fleet");
   if(isNear)classes.push("ac-near");
   if(isOnGround(ac))classes.push("ac-ground");
+  if(isBase)classes.push("ac-base");
   const track=Number.isFinite(ac.track)?ac.track:0;
-  const colorVar=fleetCfg?`--ac-color: ${fleetCfg.color};`:isNear?"--ac-color: var(--c-warn);":"--ac-color: var(--c-traffic);";
+  const colorVar=isBase?"--ac-color: var(--c-dim);":fleetCfg?`--ac-color: ${fleetCfg.color};`:isNear?"--ac-color: var(--c-warn);":"--ac-color: var(--c-traffic);";
   const label=fleetCfg?fleetCfg.label:(ac.flight?.trim()||ac.r||ac.hex||"");
-  const metaParts=[];
+  const line1Parts=[];
+  const line2Parts=[];
   if(!fleetCfg&&primaryAc&&primaryAc.hex!==ac.hex&&Number.isFinite(ac.lat)&&Number.isFinite(ac.lon)){
     const pAlt=effectiveAltFt(primaryAc.alt_baro),tAlt=effectiveAltFt(ac.alt_baro);
     if(pAlt!=null&&tAlt!=null&&Math.abs(pAlt-tAlt)<=SETTINGS.nearbyAltDisplayFt){
-      metaParts.push(fmtAltitude(ac.alt_baro));
+      line1Parts.push(fmtAltitude(ac.alt_baro));
+    }
+    if(Number.isFinite(primaryAc.lat)&&Number.isFinite(primaryAc.lon)){
+      line1Parts.push(fmtDistance(distanceNm(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon)));
     }
     if(Number.isFinite(primaryAc.track)&&Number.isFinite(primaryAc.lat)&&Number.isFinite(primaryAc.lon)){
       const b=bearingDeg(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon);
       const rel=(b-primaryAc.track+360)%360;
       const clock=Math.round(rel/30)||12;
-      metaParts.push(`${clock} o'c`);
+      line2Parts.push(`${clock} o'c`);
     }
   }
-  const metaLine=metaParts.length?`<div class="ac-meta" style="${colorVar}">${metaParts.join(" · ")}</div>`:"";
-  const html=`<div class="ac-wrap" style="${colorVar} transform: rotate(${track}deg);">${svg}</div><div class="ac-label" style="${colorVar}">${label}</div>${metaLine}`;
-  return L.divIcon({className:classes.join(" "),html,iconSize:[40,48],iconAnchor:[20,20]});
+  const line1=line1Parts.length?`<div class="ac-meta" style="${colorVar}">${line1Parts.join(" - ")}</div>`:"";
+  const line2=line2Parts.length?`<div class="ac-meta" style="${colorVar}">${line2Parts.join(" · ")}</div>`:"";
+  const html=`<div class="ac-wrap" style="${colorVar} transform: rotate(${track}deg);">${svg}</div><div class="ac-label" style="${colorVar}">${label}</div>${line1}${line2}`;
+  return L.divIcon({className:classes.join(" "),html,iconSize:[48,64],iconAnchor:[24,24]});
 }
 
-function popupHtml(ac,fleetCfg,primaryAc){
+function popupHtml(ac,fleetCfg,primaryAc,isBase){
+  if(isBase){
+    return `<div class="pop"><div class="pop-title"><span class="pop-tag fleet">BASE</span> ${fleetCfg.label}</div>
+      <div class="pop-row"><span>REG</span><b>${ac.r||"—"}</b></div>
+      <div class="pop-row"><span>COMPANY</span><b>${fleetCfg.company||"—"}</b></div>
+      <div class="pop-row"><span>STATUS</span><b>NOT AIRBORNE</b></div></div>`;
+  }
   const alt=fmtAltitude(ac.alt_baro),spd=fmtSpeed(ac.gs),hdg=fmtHeading(ac.track),sq=ac.squawk??"—",type=ac.t||"—",flt=ac.flight?.trim()||"—",reg=ac.r||"—";
   let distLine="";
   if(primaryAc&&primaryAc.hex!==ac.hex){
     const d=distanceNm(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon);
     const b=bearingDeg(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon);
-    distLine=`<div class="pop-row"><span>FROM 732HM</span><b>${fmtDistance(d)} · ${Math.round(b)}° ${compassOctant(b)}</b></div>`;
+    distLine=`<div class="pop-row"><span>FROM ${primary.label}</span><b>${fmtDistance(d)} · ${Math.round(b)}° ${compassOctant(b)}</b></div>`;
   }
   const title=fleetCfg?`<span class="pop-tag fleet">FLEET</span> ${fleetCfg.label}`:(flt!=="—"?flt:reg);
   return `<div class="pop"><div class="pop-title">${title}</div>
@@ -511,9 +540,13 @@ function render(){
   const fleetItems=[];
   for(const cfg of FLEET){
     const ac=state.fleet[cfg.registration];
-    if(!ac)continue;
-    state.fleetHexes.add(ac.hex);
-    fleetItems.push({ac,fleetCfg:cfg,layer:fleetLayer});
+    if(ac&&Number.isFinite(ac.lat)&&Number.isFinite(ac.lon)){
+      state.fleetHexes.add(ac.hex);
+      fleetItems.push({ac,fleetCfg:cfg,isBase:false,layer:fleetLayer});
+    } else if(cfg.base&&Number.isFinite(cfg.base.lat)&&Number.isFinite(cfg.base.lon)){
+      const baseAc={hex:`BASE_${cfg.registration}`,r:cfg.registration,flight:cfg.label,lat:cfg.base.lat,lon:cfg.base.lon,alt_baro:null,track:null,gs:null};
+      fleetItems.push({ac:baseAc,fleetCfg:cfg,isBase:true,layer:fleetLayer});
+    }
   }
   const trafficItems=state.traffic
     .filter(ac=>!state.fleetHexes.has(ac.hex))
@@ -526,15 +559,15 @@ function render(){
   const seenHexes=new Set(allItems.map(i=>i.ac.hex));
 
   for(const item of allItems){
-    const {ac,fleetCfg,layer}=item;
-    const isNear=primaryAc&&ac.hex!==primaryAc.hex&&
+    const {ac,fleetCfg,isBase,layer}=item;
+    const isNear=!isBase&&primaryAc&&ac.hex!==primaryAc.hex&&
       distanceNm(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon)<=SETTINGS.proximityHorizontalNm&&
       (()=>{const pAlt=effectiveAltFt(primaryAc.alt_baro),tAlt=effectiveAltFt(ac.alt_baro);if(pAlt==null||tAlt==null)return true;return Math.abs(pAlt-tAlt)<=SETTINGS.proximityVerticalFt;})();
-    const icon=buildIcon({ac,fleetCfg,isNear,primaryAc});
+    const icon=buildIcon({ac,fleetCfg,isNear,primaryAc,isBase});
     let m=markerByHex.get(ac.hex);
     if(m){m.setLatLng([ac.lat,ac.lon]);m.setIcon(icon);}
     else{m=L.marker([ac.lat,ac.lon],{icon,riseOnHover:true}).addTo(layer);m.on("click",()=>{state.selectedHex=ac.hex;});markerByHex.set(ac.hex,m);}
-    m.bindPopup(popupHtml(ac,fleetCfg,primaryAc),{className:"ac-popup",closeButton:false,offset:[0,-8]});
+    m.bindPopup(popupHtml(ac,fleetCfg,primaryAc,isBase),{className:"ac-popup",closeButton:false,offset:[0,-8]});
     if(state.selectedHex===ac.hex&&!m.isPopupOpen())m.openPopup();
   }
   for(const [hex,m] of markerByHex){
@@ -551,13 +584,30 @@ function render(){
 }
 
 function renderPanel(primaryAc,trafficItems){
-  const fleetBlocks=FLEET.map(cfg=>{
-    const ac=state.fleet[cfg.registration];
-    if(!ac)return `<div class="fleet-card offline" style="--ac-color:${cfg.color}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">no ADS-B signal</div></div>`;
-    const onGnd=isOnGround(ac);
-    return `<div class="fleet-card ${onGnd?"ground":"airborne"}" style="--ac-color:${cfg.color}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div></div>`;
-  }).join("");
-  document.getElementById("fleet-panel").innerHTML=fleetBlocks;
+  const byCompany=new Map();
+  for(const cfg of FLEET){
+    const co=cfg.company||"—";
+    if(!byCompany.has(co))byCompany.set(co,[]);
+    byCompany.get(co).push(cfg);
+  }
+  const sections=[];
+  for(const [companyName,cfgs] of byCompany){
+    const cards=cfgs.map(cfg=>{
+      const ac=state.fleet[cfg.registration];
+      if(!ac)return `<div class="fleet-card offline" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div></div>`;
+      const onGnd=isOnGround(ac);
+      return `<div class="fleet-card ${onGnd?"ground":"airborne"}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div></div>`;
+    }).join("");
+    sections.push(`<div class="company-group"><div class="company-header">${companyName}</div>${cards}</div>`);
+  }
+  document.getElementById("fleet-panel").innerHTML=sections.join("");
+  document.querySelectorAll("#fleet-panel .fleet-card").forEach(card=>{
+    card.addEventListener("click",()=>{
+      const reg=card.dataset.reg, cfg=FLEET.find(c=>c.registration===reg), ac=state.fleet[reg];
+      if(ac&&Number.isFinite(ac.lat)&&Number.isFinite(ac.lon))map.setView([ac.lat,ac.lon],Math.max(map.getZoom(),12),{animate:true});
+      else if(cfg&&cfg.base)map.setView([cfg.base.lat,cfg.base.lon],Math.max(map.getZoom(),12),{animate:true});
+    });
+  });
 
   let list=trafficItems.map(({ac})=>{
     const d=primaryAc?distanceNm(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon):distanceNm(BASE_LOCATION.lat,BASE_LOCATION.lon,ac.lat,ac.lon);

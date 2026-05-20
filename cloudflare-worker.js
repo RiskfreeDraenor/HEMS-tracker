@@ -1,5 +1,5 @@
 // ============================================================================
-//  Brick Traffic Watch — adsb.lol API proxy
+//  HEMS Tracker — adsb.lol API proxy
 //  Runs as a Cloudflare Worker. Free tier: 100,000 requests/day.
 //
 //  HOW TO DEPLOY:
@@ -8,7 +8,7 @@
 //    3. Click "Edit code", DELETE the default code, paste THIS file in full
 //    4. Click "Save and deploy"
 //    5. Copy your worker URL (looks like  https://NAME.USERNAME.workers.dev )
-//    6. Paste it into the WORKER_URL field at the top of brick-tracker.html
+//    6. Paste it into the WORKER_URL field at the top of index.html
 //
 //  See SETUP-cloudflare.md for the full walkthrough with troubleshooting.
 // ============================================================================
@@ -25,7 +25,7 @@ export default {
     // Health-check / instructions if someone opens the worker URL in a browser
     if (url.pathname === "/" || url.pathname === "") {
       return new Response(
-        "Brick Traffic Watch adsb.lol proxy.\n" +
+        "HEMS Tracker adsb.lol proxy.\n" +
         "Append a path like /v2/reg/N732HM to query.\n",
         { status: 200, headers: { ...corsHeaders(), "Content-Type": "text/plain" } }
       );
@@ -46,7 +46,7 @@ export default {
         method: "GET",
         headers: {
           "Accept":     "application/json",
-          "User-Agent": "brick-tracker-proxy/1.0",
+          "User-Agent": "hems-tracker-proxy/1.0",
         },
       });
       const body = await res.text();
