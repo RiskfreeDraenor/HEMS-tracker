@@ -144,6 +144,7 @@ const SETTINGS = {
   .company-header { font-size: 10px; font-weight: 600; letter-spacing: .25em; color: var(--c-muted); margin: 0 0 6px; padding: 0 0 5px; border-bottom: 1px solid var(--c-border); text-transform: uppercase; }
   .fleet-card { background: var(--c-surface); border: 1px solid var(--c-border); border-left: 3px solid var(--ac-color, var(--c-fleet)); padding: 10px 12px; margin-bottom: 8px; position: relative; cursor: pointer; transition: background .12s ease; }
   .fleet-card:hover { background: var(--c-surface-2); }
+  .fleet-card.focused { background: var(--c-surface-2); box-shadow: inset 0 0 0 1px var(--ac-color, var(--c-fleet)); }
   .fleet-card:last-child { margin-bottom: 0; }
   .fleet-card.offline { border-left-color: var(--c-dim); opacity: .65; }
   .fc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -194,7 +195,12 @@ const SETTINGS = {
   #footer .update b { color: var(--c-text); font-weight: 500; }
 
   .ac-marker { pointer-events: auto; }
-  .ac-wrap { width: 32px; height: 32px; margin: 0 auto; transition: transform .35s ease-out; }
+  .ac-wrap { width: 32px; height: 32px; margin: 0 auto; transition: transform .35s ease-out; position: relative; }
+  .ac-img { width: 100%; height: 100%; object-fit: contain; display: block; position: relative; z-index: 1; pointer-events: none; }
+  .ac-glow { position: absolute; inset: -6px; border-radius: 50%; background: radial-gradient(circle, var(--ac-color) 0%, transparent 62%); opacity: 0.85; filter: blur(3px); pointer-events: none; z-index: 0; }
+  .ac-base .ac-glow { display: none; }
+  .ac-base .ac-img { filter: grayscale(1); opacity: 0.55; }
+  .ac-himg.ac-near .ac-glow { background: radial-gradient(circle, var(--c-warn) 0%, transparent 62%); }
   .ac-svg { width: 100%; height: 100%; overflow: visible; }
   .ac-body { fill: var(--ac-color); stroke: var(--c-bg); stroke-width: 0.6; filter: drop-shadow(0 0 3px var(--ac-color)); }
   .ac-rotor { stroke: var(--ac-color); stroke-width: 1.4; stroke-linecap: round; opacity: .65; }
@@ -305,7 +311,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0011</div>
+  <div id="version">v.0014</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -371,6 +377,7 @@ const Api=(()=>{
 const state={radiusNm:SETTINGS.defaultRadiusNm,maxAltFt:SETTINGS.defaultMaxAltFt,fleet:{},traffic:[],fleetHexes:new Set(),trails:new Map(),lastUpdate:null,lastError:null,selectedHex:null,paused:false,
   sim:{enabled:false,primary:{lat:BASE_LOCATION.lat,lon:BASE_LOCATION.lon,alt:1500,heading:90,speed:100,autoFly:false},traffic:[]}};
 const primary=FLEET.find(a=>a.isPrimary)??FLEET[0];
+state.focusedReg=primary.registration;   // which aircraft drives rings / clock / altitude features; changed by clicking a card
 const SIM_PRIMARY_LABEL="123XX";
 const ORIG_PRIMARY_LABEL=FLEET[0].label;
 
@@ -459,13 +466,18 @@ const UNKNOWN_SVG=`<svg viewBox="-12 -12 24 24" class="ac-svg"><circle cx="0" cy
 
 function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   const isHeli=fleetCfg?.kind==="helicopter"||(fleetCfg?.kind==="auto"&&ac.category==="A7")||(!fleetCfg&&ac.category==="A7");
-  const svg=fleetCfg?(isHeli?HELI_SVG:PLANE_SVG):ac.category==="A7"?HELI_SVG:ac.category&&ac.category.startsWith("A")?PLANE_SVG:UNKNOWN_SVG;
+  const useImage=!!(fleetCfg&&isHeli);   // fleet helicopters use the photo image, traffic helicopters keep the SVG
+  const iconMarkup=useImage
+    ?`<div class="ac-glow"></div><img class="ac-img" src="ec135.png" alt=""/>`
+    :(fleetCfg?(isHeli?HELI_SVG:PLANE_SVG):ac.category==="A7"?HELI_SVG:ac.category&&ac.category.startsWith("A")?PLANE_SVG:UNKNOWN_SVG);
   const classes=["ac-marker"];
   if(fleetCfg)classes.push("ac-fleet");
   if(isNear)classes.push("ac-near");
   if(isOnGround(ac))classes.push("ac-ground");
   if(isBase)classes.push("ac-base");
+  if(useImage)classes.push("ac-himg");
   const track=Number.isFinite(ac.track)?ac.track:0;
+  const rotation=useImage?(track+90)%360:track;   // image is horizontal (cockpit on the left), +90° makes north-up
   const colorVar=isBase?"--ac-color: var(--c-dim);":fleetCfg?`--ac-color: ${fleetCfg.color};`:isNear?"--ac-color: var(--c-warn);":"--ac-color: var(--c-traffic);";
   const label=fleetCfg?fleetCfg.label:(ac.flight?.trim()||ac.r||ac.hex||"");
   const line1Parts=[];
@@ -487,11 +499,11 @@ function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   }
   const line1=line1Parts.length?`<div class="ac-meta" style="${colorVar}">${line1Parts.join(" - ")}</div>`:"";
   const line2=line2Parts.length?`<div class="ac-meta" style="${colorVar}">${line2Parts.join(" · ")}</div>`:"";
-  const html=`<div class="ac-wrap" style="${colorVar} transform: rotate(${track}deg);">${svg}</div><div class="ac-label" style="${colorVar}">${label}</div>${line1}${line2}`;
+  const html=`<div class="ac-wrap" style="${colorVar} transform: rotate(${rotation}deg);">${iconMarkup}</div><div class="ac-label" style="${colorVar}">${label}</div>${line1}${line2}`;
   return L.divIcon({className:classes.join(" "),html,iconSize:[48,64],iconAnchor:[24,24]});
 }
 
-function popupHtml(ac,fleetCfg,primaryAc,isBase){
+function popupHtml(ac,fleetCfg,primaryAc,isBase,fromLabel){
   if(isBase){
     return `<div class="pop"><div class="pop-title"><span class="pop-tag fleet">BASE</span> ${fleetCfg.label}</div>
       <div class="pop-row"><span>REG</span><b>${ac.r||"—"}</b></div>
@@ -503,7 +515,7 @@ function popupHtml(ac,fleetCfg,primaryAc,isBase){
   if(primaryAc&&primaryAc.hex!==ac.hex){
     const d=distanceNm(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon);
     const b=bearingDeg(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon);
-    distLine=`<div class="pop-row"><span>FROM ${primary.label}</span><b>${fmtDistance(d)} · ${Math.round(b)}° ${compassOctant(b)}</b></div>`;
+    distLine=`<div class="pop-row"><span>FROM ${fromLabel||primary.label}</span><b>${fmtDistance(d)} · ${Math.round(b)}° ${compassOctant(b)}</b></div>`;
   }
   const title=fleetCfg?`<span class="pop-tag fleet">FLEET</span> ${fleetCfg.label}`:(flt!=="—"?flt:reg);
   return `<div class="pop"><div class="pop-title">${title}</div>
@@ -517,8 +529,11 @@ function popupHtml(ac,fleetCfg,primaryAc,isBase){
 }
 
 function render(){
-  const primaryAc=state.fleet[primary.registration]||null;
-  const focus=primaryAc?{lat:primaryAc.lat,lon:primaryAc.lon,fromShip:true}:{lat:BASE_LOCATION.lat,lon:BASE_LOCATION.lon,fromShip:false};
+  const focusedCfg=FLEET.find(c=>c.registration===state.focusedReg)||primary;
+  const primaryAc=state.fleet[focusedCfg.registration]||null;
+  const focus=primaryAc&&Number.isFinite(primaryAc.lat)?{lat:primaryAc.lat,lon:primaryAc.lon,fromShip:true}
+    :focusedCfg.base?{lat:focusedCfg.base.lat,lon:focusedCfg.base.lon,fromShip:false}
+    :{lat:BASE_LOCATION.lat,lon:BASE_LOCATION.lon,fromShip:false};
 
   ringsLayer.clearLayers();
   const ringStep=state.radiusNm/SETTINGS.rangeRingCount;
@@ -526,7 +541,7 @@ function render(){
     const r_nm=ringStep*i, r_m=r_nm*KM_PER_NM*1000;
     L.circle([focus.lat,focus.lon],{radius:r_m,color:i===SETTINGS.rangeRingCount?"#3a4a6e":"#26334e",weight:1,dashArray:i===SETTINGS.rangeRingCount?null:"2,4",fill:false}).addTo(ringsLayer);
   }
-  L.circleMarker([focus.lat,focus.lon],{radius:4,color:focus.fromShip?primary.color:"#5a6a8a",weight:2,fill:false}).addTo(ringsLayer);
+  L.circleMarker([focus.lat,focus.lon],{radius:4,color:focus.fromShip?focusedCfg.color:"#5a6a8a",weight:2,fill:false}).addTo(ringsLayer);
 
   trailsLayer.clearLayers();
   for(const cfg of FLEET){
@@ -567,7 +582,7 @@ function render(){
     let m=markerByHex.get(ac.hex);
     if(m){m.setLatLng([ac.lat,ac.lon]);m.setIcon(icon);}
     else{m=L.marker([ac.lat,ac.lon],{icon,riseOnHover:true}).addTo(layer);m.on("click",()=>{state.selectedHex=ac.hex;});markerByHex.set(ac.hex,m);}
-    m.bindPopup(popupHtml(ac,fleetCfg,primaryAc,isBase),{className:"ac-popup",closeButton:false,offset:[0,-8]});
+    m.bindPopup(popupHtml(ac,fleetCfg,primaryAc,isBase,focusedCfg.label),{className:"ac-popup",closeButton:false,offset:[0,-8]});
     if(state.selectedHex===ac.hex&&!m.isPopupOpen())m.openPopup();
   }
   for(const [hex,m] of markerByHex){
@@ -594,9 +609,10 @@ function renderPanel(primaryAc,trafficItems){
   for(const [companyName,cfgs] of byCompany){
     const cards=cfgs.map(cfg=>{
       const ac=state.fleet[cfg.registration];
-      if(!ac)return `<div class="fleet-card offline" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div></div>`;
+      const focusCls=state.focusedReg===cfg.registration?" focused":"";
+      if(!ac)return `<div class="fleet-card offline${focusCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div></div>`;
       const onGnd=isOnGround(ac);
-      return `<div class="fleet-card ${onGnd?"ground":"airborne"}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div></div>`;
+      return `<div class="fleet-card ${onGnd?"ground":"airborne"}${focusCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div></div>`;
     }).join("");
     sections.push(`<div class="company-group"><div class="company-header">${companyName}</div>${cards}</div>`);
   }
@@ -604,8 +620,10 @@ function renderPanel(primaryAc,trafficItems){
   document.querySelectorAll("#fleet-panel .fleet-card").forEach(card=>{
     card.addEventListener("click",()=>{
       const reg=card.dataset.reg, cfg=FLEET.find(c=>c.registration===reg), ac=state.fleet[reg];
+      state.focusedReg=reg;
       if(ac&&Number.isFinite(ac.lat)&&Number.isFinite(ac.lon))map.setView([ac.lat,ac.lon],Math.max(map.getZoom(),12),{animate:true});
       else if(cfg&&cfg.base)map.setView([cfg.base.lat,cfg.base.lon],Math.max(map.getZoom(),12),{animate:true});
+      render();
     });
   });
 
