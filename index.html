@@ -199,7 +199,7 @@ const SETTINGS = {
   /* CSS sprite: icons.webp is 575×791 with 8 cols × ~11 rows; we display each cell at 32×32.
      Scaling 575→256 makes each cell exactly 32 wide. Pick a cell with background-position: -(col*32)px -(row*32)px. */
   .ac-spr { width: 100%; height: 100%; background-image: url('icons.webp'); background-size: 256px 352px; background-repeat: no-repeat; display: block; position: relative; z-index: 1; pointer-events: none; }
-  .ac-spr-heli { background-position: -224px -192px; }   /* row 6, col 7 */
+  .ac-spr-heli { background-position: -192px -160px; }   /* row 6, col 7 (1-indexed, as per the sprite grid you annotated) */
   .ac-glow { position: absolute; inset: -6px; border-radius: 50%; background: radial-gradient(circle, var(--ac-color) 0%, transparent 62%); opacity: 0.85; filter: blur(3px); pointer-events: none; z-index: 0; }
   .ac-base .ac-glow { display: none; }
   .ac-base .ac-spr { filter: grayscale(1); opacity: 0.55; }
@@ -314,7 +314,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0016</div>
+  <div id="version">v.0017</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
