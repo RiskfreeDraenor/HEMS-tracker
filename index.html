@@ -199,7 +199,7 @@ const SETTINGS = {
   /* CSS sprite: icons.webp is 575×791 with 8 cols × ~11 rows; we display each cell at 32×32.
      Scaling 575→256 makes each cell exactly 32 wide. Pick a cell with background-position: -(col*32)px -(row*32)px. */
   .ac-spr { width: 100%; height: 100%; background-image: url('icons.webp'); background-size: 256px 352px; background-repeat: no-repeat; display: block; position: relative; z-index: 1; pointer-events: none; }
-  .ac-spr-heli { background-position: -192px -160px; }   /* row 6, col 7 (1-indexed, as per the sprite grid you annotated) */
+  /* (background-position is set inline per category — see CATEGORY_SPRITE in the script block) */
   .ac-glow { position: absolute; inset: -6px; border-radius: 50%; background: radial-gradient(circle, var(--ac-color) 0%, transparent 62%); opacity: 0.85; filter: blur(3px); pointer-events: none; z-index: 0; }
   .ac-base .ac-glow { display: none; }
   .ac-base .ac-spr { filter: grayscale(1); opacity: 0.55; }
@@ -342,7 +342,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0022</div>
+  <div id="version">v.0023</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -665,8 +665,23 @@ function render(){
     m.bindPopup(popupHtml(ac,fleetCfg,primaryAc,isBase,focusedCfg.label),{className:"ac-popup",closeButton:false,offset:[0,-8]});
     if(state.selectedHex===ac.hex&&!m.isPopupOpen())m.openPopup();
   }
+  // Marker persistence — ADS-B responses are noisy and an aircraft can drop out of
+  // one response and reappear in the next. Give each marker a grace period before
+  // removing it; if it comes back within the window we just keep the same marker.
+  if(!state.markerSeenAt) state.markerSeenAt = new Map();
+  const _nowMs = Date.now();
+  for(const hex of seenHexes) state.markerSeenAt.set(hex, _nowMs);
+  const MARKER_GRACE_MS = 9000;
   for(const [hex,m] of markerByHex){
-    if(!seenHexes.has(hex)){m.remove();markerByHex.delete(hex);if(state.selectedHex===hex)state.selectedHex=null;}
+    if(seenHexes.has(hex)) continue;
+    const lastSeen = state.markerSeenAt.get(hex) || 0;
+    if(_nowMs - lastSeen > MARKER_GRACE_MS){
+      m.remove();
+      markerByHex.delete(hex);
+      state.markerSeenAt.delete(hex);
+      if(state.selectedHex===hex) state.selectedHex=null;
+    }
+    // else: leave the marker on the map at its last position; refresh when aircraft reappears
   }
 
   if(focus.fromShip){
