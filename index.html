@@ -252,6 +252,7 @@ const SETTINGS = {
   .flight-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 3px; }
   .flight-call { font-weight: 600; font-size: 11px; letter-spacing: .04em; color: var(--ac-color); }
   .flight-time { font-size: 10px; color: var(--c-muted); letter-spacing: .05em; }
+  .flight-route { font-size: 10px; color: var(--c-text); letter-spacing: .03em; margin: 2px 0 3px; opacity: 0.85; }
   .flight-stats { display: flex; gap: 12px; font-size: 10px; color: var(--c-muted); letter-spacing: .03em; }
   .flight-stats b { color: var(--c-text); font-weight: 500; }
   .flight-empty { padding: 18px 10px; text-align: center; color: var(--c-dim); font-size: 11px; letter-spacing: .15em; }
@@ -341,7 +342,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0020</div>
+  <div id="version">v.0021</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -762,6 +763,22 @@ function clearFlightTrack(){
   document.getElementById("clear-track-btn").style.display = "none";
 }
 
+// Resolve a lat/lon to a human-friendly location name.
+// Airport-DB hits take precedence because FLEET base.name often contains
+// the input street address ("123 Main St, Brick NJ 08724") and addresses
+// should never surface in the UI. Fleet base name is only used as a fallback
+// when the helipad isn't in OurAirports.
+function resolveLocation(lat, lon, airportFromServer){
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  if (airportFromServer) return airportFromServer;
+  for (const cfg of FLEET) {
+    if (cfg.base && Number.isFinite(cfg.base.lat) && Number.isFinite(cfg.base.lon)) {
+      if (distanceNm(cfg.base.lat, cfg.base.lon, lat, lon) <= 0.5) return cfg.base.name;
+    }
+  }
+  return null;
+}
+
 function renderFlightLog(flights){
   const list = document.getElementById("flight-log-list");
   const count = document.getElementById("flight-count");
@@ -782,8 +799,14 @@ function renderFlightLog(flights){
     const maxAlt = f.max_alt_ft ? `${Math.round(f.max_alt_ft).toLocaleString()}ft` : "—";
     const maxSpd = f.max_speed_kt ? `${Math.round(f.max_speed_kt)}kt` : "—";
     const dist = (f.distance_nm != null && f.distance_nm > 0) ? `${f.distance_nm.toFixed(1)}nm` : "—";
+    const fromLoc = resolveLocation(f.takeoff_lat, f.takeoff_lon, f.airport_takeoff);
+    const toLoc   = airborne ? null : resolveLocation(f.landing_lat, f.landing_lon, f.airport_landing);
+    const routeLine = (fromLoc || toLoc) || airborne
+      ? `<div class="flight-route">${fromLoc || "scene"} → ${airborne ? "…" : (toLoc || "scene")}</div>`
+      : "";
     return `<li class="flight-row ${airborne?"airborne":""}" data-flight-id="${f.id}" data-color="${color}" style="--ac-color:${color}">
       <div class="flight-top"><span class="flight-call">${label}</span><span class="flight-time">${dateStr} · ${duration}</span></div>
+      ${routeLine}
       <div class="flight-stats"><span>ALT <b>${maxAlt}</b></span><span>SPD <b>${maxSpd}</b></span><span>DIST <b>${dist}</b></span></div>
     </li>`;
   }).join("");
