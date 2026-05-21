@@ -42,7 +42,9 @@ const FLEET = [
     company:      "Hackensack",
     image:        "pictures/732hm.png",       // shown faintly behind the fleet card
     mapIcon:      "map-icons/ec135.png",      // custom map marker icon (overrides sprite cell)
-    mapIconRotation: -90,                     // cockpit on right side of image → rotate −90° so it points "up" at track=0
+    mapIconRotation: -91,                     // cockpit on right side of image → rotate so it points "up" at track=0
+    mapIconSize:     62,
+    mapIconAnchorY:  0,
     base: { lat: 40.078262, lon: -74.132108, name: "Outpatient Parking, Brick Township, NJ 08724" },
   },
   {
@@ -53,7 +55,9 @@ const FLEET = [
     company:      "Hackensack",
     image:        "pictures/511HU.png",
     mapIcon:      "map-icons/ec135.png",
-    mapIconRotation: -90,
+    mapIconRotation: -91,
+    mapIconSize:     62,
+    mapIconAnchorY:  0,
     base: { lat: 41.1327789, lon: -74.3405939, name: "126 Airport Rd #7, West Milford, NJ 07480" },
   },
 
@@ -443,7 +447,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0031</div>
+  <div id="version">v.0032</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -734,6 +738,24 @@ function popupHtml(ac,fleetCfg,primaryAc,isBase,fromLabel){
 }
 
 function render(){
+  // Icon tester: while an uploaded icon is loaded, synthesize an "in flight"
+  // state for FLEET[0] so the test marker renders as a live (full-color, glowy)
+  // fleet aircraft instead of the dim grey base marker. Makes it possible to
+  // judge the icon as it'll actually appear on a flying aircraft.
+  if (state.iconTester && state.iconTester.iconDataUrl && FLEET[0]) {
+    const cfg = FLEET[0];
+    state.fleet[cfg.registration] = {
+      hex:      `TEST_${cfg.registration}`,
+      r:        cfg.registration,
+      flight:   cfg.label,
+      lat:      cfg.base ? cfg.base.lat : BASE_LOCATION.lat,
+      lon:      cfg.base ? cfg.base.lon : BASE_LOCATION.lon,
+      alt_baro: 1500,
+      gs:       100,
+      track:    0,
+      category: "A7",
+    };
+  }
   const focusedCfg=FLEET.find(c=>c.registration===state.focusedReg)||primary;
   const primaryAc=state.fleet[focusedCfg.registration]||null;
   const focus=primaryAc&&Number.isFinite(primaryAc.lat)?{lat:primaryAc.lat,lon:primaryAc.lon,fromShip:true}
