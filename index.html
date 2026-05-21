@@ -42,9 +42,12 @@ const FLEET = [
     company:      "Hackensack",
     image:        "pictures/732hm.png",       // shown faintly behind the fleet card
     mapIcon:      "map-icons/ec135.png",      // custom map marker icon (overrides sprite cell)
-    mapIconRotation: -91,                     // cockpit on right side of image → rotate so it points "up" at track=0
-    mapIconSize:     62,
+    mapIconRotation: -90,                     // cockpit on right side of image → rotate so it points "up" at track=0
+    mapIconSize:     75,
     mapIconAnchorY:  0,
+    mapGlowOpacity:  0.16,                    // faint blue halo
+    mapGlowSize:     0,
+    mapGlowColor:    "#0767f8",
     base: { lat: 40.078262, lon: -74.132108, name: "Outpatient Parking, Brick Township, NJ 08724" },
   },
   {
@@ -55,9 +58,12 @@ const FLEET = [
     company:      "Hackensack",
     image:        "pictures/511HU.png",
     mapIcon:      "map-icons/ec135.png",
-    mapIconRotation: -91,
-    mapIconSize:     62,
+    mapIconRotation: -90,
+    mapIconSize:     75,
     mapIconAnchorY:  0,
+    mapGlowOpacity:  0.16,
+    mapGlowSize:     0,
+    mapGlowColor:    "#0767f8",
     base: { lat: 41.1327789, lon: -74.3405939, name: "126 Airport Rd #7, West Milford, NJ 07480" },
   },
 
@@ -450,7 +456,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0033</div>
+  <div id="version">v.0034</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
