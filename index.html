@@ -648,6 +648,9 @@ function render(){
     .filter(ac=>SETTINGS.includeGroundTraffic||!isOnGround(ac))
     .filter(ac=>{const a=effectiveAltFt(ac.alt_baro);return a==null||a<=state.maxAltFt;})
     .filter(ac=>Number.isFinite(ac.lat)&&Number.isFinite(ac.lon))
+    // Hard radius clip — adsb.lol's bbox query is approximate; without this,
+    // aircraft just outside the requested radius flicker in and out each tick.
+    .filter(ac=>distanceNm(focus.lat,focus.lon,ac.lat,ac.lon)<=state.radiusNm)
     .map(ac=>({ac,fleetCfg:null,layer:trafficLayer}));
 
   const allItems=[...fleetItems,...trafficItems];
