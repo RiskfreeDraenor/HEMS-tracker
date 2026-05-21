@@ -66,6 +66,22 @@ const FLEET = [
     mapGlowColor:    "#0767f8",
     base: { lat: 41.1327789, lon: -74.3405939, name: "126 Airport Rd #7, West Milford, NJ 07480" },
   },
+  {
+    registration: "N456MT",
+    label:        "RWJB1",
+    color:        "#E63946",                   // RWJ Life Flight — red branding
+    kind:         "helicopter",
+    company:      "RWJ Life Flight",
+    image:        "pictures/n456mt.png",
+    mapIcon:      "map-icons/ec135LifeFlight.png",
+    mapIconRotation: -90,                      // same cockpit-right orientation as the blue EC135
+    mapIconSize:     75,
+    mapIconAnchorY:  0,
+    mapGlowOpacity:  0.16,
+    mapGlowSize:     0,
+    mapGlowColor:    "#E63946",
+    base: { lat: 39.92880245894178, lon: -74.29535024645735, name: "KMJX Ocean County Airport" },
+  },
 
   // EXAMPLE — uncomment and edit to add another aircraft:
   // {
@@ -456,7 +472,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0034</div>
+  <div id="version">v.0035</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
