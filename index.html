@@ -84,7 +84,7 @@ const SETTINGS = {
   rangeRingCount: 4,
   includeGroundTraffic: false,     // show parked aircraft?
   nearbyAltDisplayFt: 5000,        // show altitude on traffic markers within this vertical separation from primary
-  defaultMaxAltFt:  1000,          // initial value for altitude filter slider
+  defaultMaxAltFt:  3000,          // initial value for altitude filter slider
   minMaxAltFt:       500,
   maxMaxAltFt:     30000,
   trailMaxPoints:    200,          // ~10 min of breadcrumbs at 3s polling
@@ -293,7 +293,7 @@ const SETTINGS = {
         <input type="range" id="radius-slider" />
         <div class="radius-row" style="margin-top:10px;">
           <label for="alt-slider">MAX ALTITUDE</label>
-          <span id="alt-readout">1,000 ft</span>
+          <span id="alt-readout">3,000 ft</span>
         </div>
         <input type="range" id="alt-slider" />
         <div class="btn-row">
@@ -342,7 +342,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0026</div>
+  <div id="version">v.0027</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
