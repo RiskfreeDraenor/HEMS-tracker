@@ -40,7 +40,9 @@ const FLEET = [
     isPrimary:    true,              // trail/clock/altitude features use this one
     kind:         "helicopter",      // "helicopter" or "fixed-wing"
     company:      "Hackensack",
-    image:        "pictures/732hm.png",   // shown faintly behind the fleet card
+    image:        "pictures/732hm.png",       // shown faintly behind the fleet card
+    mapIcon:      "map-icons/ec135.png",      // custom map marker icon (overrides sprite cell)
+    mapIconRotation: -90,                     // cockpit on right side of image → rotate −90° so it points "up" at track=0
     base: { lat: 40.078262, lon: -74.132108, name: "Outpatient Parking, Brick Township, NJ 08724" },
   },
   {
@@ -50,6 +52,8 @@ const FLEET = [
     kind:         "helicopter",
     company:      "Hackensack",
     image:        "pictures/511HU.png",
+    mapIcon:      "map-icons/ec135.png",
+    mapIconRotation: -90,
     base: { lat: 41.1327789, lon: -74.3405939, name: "126 Airport Rd #7, West Milford, NJ 07480" },
   },
 
@@ -358,7 +362,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0029</div>
+  <div id="version">v.0030</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -562,13 +566,20 @@ const UNKNOWN_SVG=`<svg viewBox="-12 -12 24 24" class="ac-svg"><circle cx="0" cy
 
 function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   const isHeli=fleetCfg?.kind==="helicopter"||(fleetCfg?.kind==="auto"&&ac.category==="A7")||(!fleetCfg&&ac.category==="A7");
-  // Every marker now uses an icons.webp sprite cell based on ADS-B category.
-  // Fleet aircraft get the company-color glow underneath; traffic doesn't.
+  // Marker icon resolution, in order of priority:
+  //   1) fleetCfg.mapIcon — a custom PNG per fleet aircraft (overrides everything else)
+  //   2) CATEGORY_SPRITE[ac.category] — sprite cell from icons.webp
+  //   3) UNKNOWN_SPRITE — fallback "?" cell
+  // Fleet aircraft also get a company-color radial glow underneath; traffic doesn't.
+  const customIcon = fleetCfg?.mapIcon;
   const cell = fleetCfg
     ? CATEGORY_SPRITE.A7
     : (CATEGORY_SPRITE[ac.category] || UNKNOWN_SPRITE);
+  const spriteStyle = customIcon
+    ? `background-image: url('${customIcon}'); background-size: contain; background-position: center;`
+    : spriteBgPos(cell);
   const useSprite = true;
-  const iconMarkup = `${fleetCfg ? '<div class="ac-glow"></div>' : ''}<div class="ac-spr" style="${spriteBgPos(cell)}"></div>`;
+  const iconMarkup = `${fleetCfg ? '<div class="ac-glow"></div>' : ''}<div class="ac-spr" style="${spriteStyle}"></div>`;
   const classes=["ac-marker"];
   if(fleetCfg)classes.push("ac-fleet");
   if(isNear)classes.push("ac-near");
@@ -576,7 +587,11 @@ function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   if(isBase)classes.push("ac-base");
   if(useSprite)classes.push("ac-himg");
   const track=Number.isFinite(ac.track)?ac.track:0;
-  const rotation=track;   // sprite icons are drawn pointing up (north) at track=0, no offset needed
+  // Per-icon rotation offset: sprite icons all face up at track=0, but custom map
+  // icons may be drawn with the cockpit pointing some other way. Each fleet entry
+  // can declare `mapIconRotation` to compensate (e.g. -90 if cockpit is on the right).
+  const iconOffset = customIcon ? (fleetCfg?.mapIconRotation || 0) : 0;
+  const rotation = (track + iconOffset + 360) % 360;
   const colorVar=isBase?"--ac-color: var(--c-dim);":fleetCfg?`--ac-color: ${fleetCfg.color};`:isNear?"--ac-color: var(--c-warn);":"--ac-color: var(--c-traffic);";
   const label=fleetCfg?fleetCfg.label:(ac.flight?.trim()||ac.r||ac.hex||"");
   const line1Parts=[];
