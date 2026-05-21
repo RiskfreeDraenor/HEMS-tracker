@@ -342,7 +342,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0025</div>
+  <div id="version">v.0026</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -754,8 +754,20 @@ function renderPanel(primaryAc,trafficItems){
 
   const ts=state.lastUpdate?new Date(state.lastUpdate).toLocaleTimeString("en-US",{hour12:false}):"—";
   document.getElementById("last-update").textContent=ts;
-  document.getElementById("status-dot").className="status-dot "+(state.lastError?"err":"ok");
-  document.getElementById("status-text").textContent=state.lastError?`ERR: ${state.lastError}`:"LIVE";
+  // Status: ERR > LIVE > CONNECTING. We're only "LIVE" after at least one
+  // successful poll has landed; before that the dot stays neutral.
+  const sd = document.getElementById("status-dot");
+  const stx = document.getElementById("status-text");
+  if (state.lastError) {
+    sd.className = "status-dot err";
+    stx.textContent = `ERR: ${state.lastError}`;
+  } else if (state.lastUpdate) {
+    sd.className = "status-dot ok";
+    stx.textContent = "LIVE";
+  } else {
+    sd.className = "status-dot";
+    stx.textContent = "CONNECTING…";
+  }
 
   // Fleet summary in topbar — N airborne / total
   const totalFleet = FLEET.length;
@@ -1004,15 +1016,18 @@ function initUI(){
 window.addEventListener("DOMContentLoaded", () => {
   initUI();
   document.getElementById("clear-track-btn").addEventListener("click", clearFlightTrack);
-  // Fire both data sources in parallel — whichever returns first paints the map.
-  // warmStart() is non-destructive so it can't overwrite tick()'s fresher data.
+  // Paint the map IMMEDIATELY so the user sees rings + dim base markers even
+  // before the first API call returns. Avoids the "blank dark map" gap that
+  // made initial load feel broken when fleet aircraft are offline.
+  render();
+  fitAllFleet();
+  // Then kick off both data sources in parallel — whichever returns first
+  // repaints with real positions. warmStart is non-destructive vs tick.
   warmStart();
   tick();
   setInterval(tick, SETTINGS.refreshIntervalMs);
   tickFlightLog();
   setInterval(tickFlightLog, 15000);
-  // Fit the map after either data source has had a chance to land
-  setTimeout(fitAllFleet, 1000);
 });
 </script>
 </body>
