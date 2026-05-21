@@ -277,6 +277,17 @@ const SETTINGS = {
   .btn:hover { background: var(--c-surface-2); border-color: var(--c-border-2); }
   .btn.paused { background: var(--c-warn); color: var(--c-bg); border-color: var(--c-warn); }
   .btn.active { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+  .btn-select {
+    appearance: none; -webkit-appearance: none; -moz-appearance: none;
+    background-image: linear-gradient(45deg, transparent 50%, var(--c-muted) 50%),
+                      linear-gradient(135deg, var(--c-muted) 50%, transparent 50%);
+    background-position: calc(100% - 12px) 50%, calc(100% - 7px) 50%;
+    background-size: 5px 5px, 5px 5px;
+    background-repeat: no-repeat;
+    padding-right: 22px;
+  }
+  .btn-select.active { background-color: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+  .btn-select option { background: var(--c-bg-2); color: var(--c-text); }
 
   /* Airport overlay popup uses .ac-popup styling already; mark airport circles
      as pointer-friendly so clicks land. Leaflet's circleMarker has its own
@@ -406,7 +417,13 @@ const SETTINGS = {
           <button class="btn" id="pause-btn">❚❚ PAUSE</button>
         </div>
         <div class="btn-row">
-          <button class="btn" id="airports-toggle-btn">⊕ SHOW AIRPORTS</button>
+          <select class="btn btn-select" id="airports-mode-select">
+            <option value="off">⊕ AIRPORTS: OFF</option>
+            <option value="airports">⊕ AIRPORTS ONLY</option>
+            <option value="heliports">⊕ HELIPORTS ONLY</option>
+            <option value="large">⊕ MAJOR AIRPORTS</option>
+            <option value="all">⊕ ALL</option>
+          </select>
         </div>
       </section>
 
@@ -481,7 +498,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0036</div>
+  <div id="version">v.0037</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -636,8 +653,16 @@ const airportsLayer=L.layerGroup();   // not added to map yet — toggled via th
 const markerByHex=new Map();
 
 /* ---------- Airport overlay (subtle dots per type) ---------- */
-let airportsVisible = false;
+const AIRPORT_MODE_TYPES = {
+  off:       new Set(),
+  airports:  new Set(["small_airport", "medium_airport", "large_airport"]),
+  heliports: new Set(["heliport"]),
+  large:     new Set(["large_airport", "medium_airport"]),
+  all:       new Set(["small_airport", "medium_airport", "large_airport", "heliport", "seaplane_base"]),
+};
+let airportsMode  = "off";
 let lastAirportBbox = null;
+let airportsCache   = [];   // server response cached so mode changes don't re-fetch
 
 function createAirportMarker(ap){
   // Styled subtly so nothing competes with aircraft markers for attention.
@@ -1400,18 +1425,17 @@ function initUI(){
   });
 
   document.getElementById("recenter-btn").addEventListener("click", fitAllFleet);
-  document.getElementById("airports-toggle-btn").addEventListener("click", (e) => {
-    airportsVisible = !airportsVisible;
-    if (airportsVisible) {
-      map.addLayer(airportsLayer);
-      e.currentTarget.classList.add("active");
-      e.currentTarget.textContent = "⊕ HIDE AIRPORTS";
-      lastAirportBbox = null;
-      refreshAirports();
-    } else {
+  const airportsSelect = document.getElementById("airports-mode-select");
+  airportsSelect.addEventListener("change", (e) => {
+    airportsMode = e.target.value;
+    if (airportsMode === "off") {
       map.removeLayer(airportsLayer);
-      e.currentTarget.classList.remove("active");
-      e.currentTarget.textContent = "⊕ SHOW AIRPORTS";
+      airportsLayer.clearLayers();
+      e.target.classList.remove("active");
+    } else {
+      map.addLayer(airportsLayer);
+      e.target.classList.add("active");
+      refreshAirports();
     }
   });
   document.getElementById("pause-btn").addEventListener("click",e=>{
