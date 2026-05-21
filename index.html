@@ -342,7 +342,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0024</div>
+  <div id="version">v.0025</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -884,13 +884,16 @@ async function warmStart(){
     const res = await fetch(`${workerLogBase}/state`, { cache: "no-store" });
     if (!res.ok) return;
     const data = await res.json();
-    const STALE_MS = 60 * 1000;  // ignore rows the DO hasn't touched in 60s
+    const STALE_MS = 60 * 1000;
     const now = Date.now();
+    let added = 0;
     for (const row of (data.aircraft || [])) {
+      // Non-destructive: if tick() already populated this aircraft from adsb.lol,
+      // leave the fresher data alone. We only paint aircraft tick hasn't touched yet.
+      if (state.fleet[row.reg]) continue;
       if (row.confirmed_state === "offline") continue;
       if (!Number.isFinite(row.last_lat) || !Number.isFinite(row.last_lon)) continue;
       if (now - (row.last_seen || 0) > STALE_MS) continue;
-      // Synthesize an adsb.lol-shaped ac object from the cached row
       state.fleet[row.reg] = {
         hex:      `CACHED_${row.reg}`,
         r:        row.reg,
@@ -901,9 +904,12 @@ async function warmStart(){
         gs:       row.last_gs,
         track:    row.last_track,
       };
+      added++;
     }
-    state.lastUpdate = Date.now();
-    render();
+    if (added > 0) {
+      state.lastUpdate = state.lastUpdate || Date.now();
+      render();
+    }
   } catch(e) {
     console.warn("warmStart failed:", e);
   }
@@ -995,16 +1001,18 @@ function initUI(){
   map.on("click",()=>{state.selectedHex=null;});
 }
 
-window.addEventListener("DOMContentLoaded", async () => {
+window.addEventListener("DOMContentLoaded", () => {
   initUI();
   document.getElementById("clear-track-btn").addEventListener("click", clearFlightTrack);
-  // Warm start: paint last-known positions from worker D1 before hitting adsb.lol
-  await warmStart();
-  fitAllFleet();
+  // Fire both data sources in parallel — whichever returns first paints the map.
+  // warmStart() is non-destructive so it can't overwrite tick()'s fresher data.
+  warmStart();
   tick();
   setInterval(tick, SETTINGS.refreshIntervalMs);
   tickFlightLog();
-  setInterval(tickFlightLog, 15000);   // refresh flight log every 15s
+  setInterval(tickFlightLog, 15000);
+  // Fit the map after either data source has had a chance to land
+  setTimeout(fitAllFleet, 1000);
 });
 </script>
 </body>
