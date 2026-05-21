@@ -341,7 +341,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0019</div>
+  <div id="version">v.0020</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -677,6 +677,7 @@ function renderPanel(primaryAc,trafficItems){
       if(ac&&Number.isFinite(ac.lat)&&Number.isFinite(ac.lon))map.setView([ac.lat,ac.lon],Math.max(map.getZoom(),12),{animate:true});
       else if(cfg&&cfg.base)map.setView([cfg.base.lat,cfg.base.lon],Math.max(map.getZoom(),12),{animate:true});
       render();
+      tick();    // re-fetch traffic around the newly-focused aircraft
     });
   });
 
@@ -801,6 +802,43 @@ async function tickFlightLog(){
   renderFlightLog(flights);
 }
 
+/* ---------- Warm start: pre-populate fleet positions from worker D1 ----------
+   The Durable Object has been polling adsb.lol every 3s and storing last-known
+   positions. On page load we fetch /log/state once, populate state.fleet from
+   the cached rows, and render — so the map shows aircraft within ~100ms instead
+   of waiting for the first adsb.lol round-trip. tick() will overwrite this
+   data with fresh adsb.lol data a moment later. */
+async function warmStart(){
+  if (!workerLogBase) return;
+  try {
+    const res = await fetch(`${workerLogBase}/state`, { cache: "no-store" });
+    if (!res.ok) return;
+    const data = await res.json();
+    const STALE_MS = 60 * 1000;  // ignore rows the DO hasn't touched in 60s
+    const now = Date.now();
+    for (const row of (data.aircraft || [])) {
+      if (row.confirmed_state === "offline") continue;
+      if (!Number.isFinite(row.last_lat) || !Number.isFinite(row.last_lon)) continue;
+      if (now - (row.last_seen || 0) > STALE_MS) continue;
+      // Synthesize an adsb.lol-shaped ac object from the cached row
+      state.fleet[row.reg] = {
+        hex:      `CACHED_${row.reg}`,
+        r:        row.reg,
+        flight:   row.reg,
+        lat:      row.last_lat,
+        lon:      row.last_lon,
+        alt_baro: row.confirmed_state === "ground" ? "ground" : row.last_alt,
+        gs:       row.last_gs,
+        track:    row.last_track,
+      };
+    }
+    state.lastUpdate = Date.now();
+    render();
+  } catch(e) {
+    console.warn("warmStart failed:", e);
+  }
+}
+
 async function tick(){
   if(state.paused)return;
   if(state.sim.enabled){simTick();render();return;}
@@ -821,9 +859,16 @@ async function tick(){
         while(pts.length>SETTINGS.trailMaxPoints)pts.shift();
       }
     }
-    const primaryAc=state.fleet[primary.registration];
-    const focus=primaryAc?{lat:primaryAc.lat,lon:primaryAc.lon}:{lat:BASE_LOCATION.lat,lon:BASE_LOCATION.lon};
-    state.traffic=await Api.trafficNear(focus.lat,focus.lon,state.radiusNm);
+    // Traffic query is centered on the FOCUSED aircraft (not the static "primary").
+    // This lets clicking any fleet card re-center the live traffic feed.
+    const focusedCfg = FLEET.find(c => c.registration === state.focusedReg) || primary;
+    const focusedAc  = state.fleet[focusedCfg.registration];
+    const focus = (focusedAc && Number.isFinite(focusedAc.lat) && Number.isFinite(focusedAc.lon))
+      ? { lat: focusedAc.lat, lon: focusedAc.lon }
+      : focusedCfg.base
+        ? { lat: focusedCfg.base.lat, lon: focusedCfg.base.lon }
+        : { lat: BASE_LOCATION.lat, lon: BASE_LOCATION.lon };
+    state.traffic = await Api.trafficNear(focus.lat, focus.lon, state.radiusNm);
     state.lastUpdate=Date.now();
     state.lastError=null;
   }catch(e){state.lastError=e.message||String(e);}
@@ -880,15 +925,16 @@ function initUI(){
   map.on("click",()=>{state.selectedHex=null;});
 }
 
-window.addEventListener("DOMContentLoaded",()=>{
+window.addEventListener("DOMContentLoaded", async () => {
   initUI();
   document.getElementById("clear-track-btn").addEventListener("click", clearFlightTrack);
+  // Warm start: paint last-known positions from worker D1 before hitting adsb.lol
+  await warmStart();
+  fitAllFleet();
   tick();
   setInterval(tick, SETTINGS.refreshIntervalMs);
   tickFlightLog();
   setInterval(tickFlightLog, 15000);   // refresh flight log every 15s
-  // Once the first tick lands fleet data, fit the map to all fleet bases/positions
-  setTimeout(fitAllFleet, 500);
 });
 </script>
 </body>
