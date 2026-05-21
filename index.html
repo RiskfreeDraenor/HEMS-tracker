@@ -189,10 +189,63 @@ const SETTINGS = {
   input[type="range"]::-webkit-slider-thumb { -webkit-appearance: none; width: 14px; height: 14px; background: var(--c-fleet); border: 2px solid var(--c-bg); border-radius: 50%; cursor: pointer; box-shadow: 0 0 6px var(--c-fleet); }
   input[type="range"]::-moz-range-thumb { width: 14px; height: 14px; background: var(--c-fleet); border: 2px solid var(--c-bg); border-radius: 50%; cursor: pointer; }
 
-  .dev-header { display: flex; align-items: center; gap: 10px; }
   .sim-row { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; margin-bottom: 4px; }
   .sim-row label { font-size: 10px; letter-spacing: .25em; color: var(--c-muted); }
   .sim-row span { font-size: 13px; font-weight: 600; color: var(--c-fleet); letter-spacing: .05em; }
+
+  /* ===== Floating DEV TOOLS panel ===== */
+  #dev-open-btn {
+    position: fixed; top: 58px; right: 16px; z-index: 1400;
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: .2em; font-weight: 600;
+    padding: 7px 12px; cursor: pointer; transition: all .15s ease;
+  }
+  #dev-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+
+  #dev-panel {
+    position: fixed; top: 58px; right: 16px; z-index: 1500;
+    width: 360px; max-height: calc(100vh - 80px);
+    background: var(--c-bg-2); border: 1px solid var(--c-border-2);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+    display: flex; flex-direction: column;
+  }
+  #dev-panel.hidden { display: none; }
+  .dev-bar {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 8px 14px; border-bottom: 1px solid var(--c-border);
+    background: linear-gradient(180deg, var(--c-bg), var(--c-bg-2));
+  }
+  .dev-bar span { font-size: 11px; letter-spacing: .3em; color: var(--c-fleet); font-weight: 600; }
+  #dev-close-btn {
+    background: none; border: none; color: var(--c-muted);
+    font-size: 22px; line-height: 1; cursor: pointer; padding: 0 6px;
+  }
+  #dev-close-btn:hover { color: var(--c-warn); }
+  .dev-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
+  .dev-section + .dev-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--c-border); }
+  .dev-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+  .dev-section h4 { font-size: 10px; letter-spacing: .3em; color: var(--c-muted); margin: 0 0 8px; font-weight: 600; }
+  .dev-section-head h4 { margin: 0; flex: 1; }
+  .dev-hint { font-size: 10px; color: var(--c-muted); line-height: 1.45; margin-bottom: 10px; }
+  .dev-hint b { color: var(--c-text); font-weight: 600; }
+  #icon-upload {
+    font-family: var(--f-mono); font-size: 11px; color: var(--c-text);
+    width: 100%; padding: 6px; background: var(--c-surface);
+    border: 1px solid var(--c-border); margin-bottom: 10px;
+  }
+  .icon-config-row { display: flex; align-items: center; gap: 8px; margin: 6px 0; }
+  .icon-config-row label { font-size: 10px; letter-spacing: .15em; color: var(--c-muted); width: 76px; }
+  .icon-config-row input[type="range"] { flex: 1; }
+  .icon-config-row span { font-size: 11px; color: var(--c-fleet); font-weight: 600; min-width: 52px; text-align: right; letter-spacing: .03em; }
+  .config-preview {
+    background: var(--c-surface); border: 1px solid var(--c-border);
+    padding: 10px; margin-top: 10px;
+    font-family: var(--f-mono); font-size: 10px; color: var(--c-text);
+    white-space: pre-wrap; line-height: 1.5; user-select: all;
+  }
+  @media (max-width: 800px) {
+    #dev-panel { width: calc(100vw - 32px); right: 16px; left: 16px; }
+  }
   .btn-row { display: flex; gap: 6px; margin-top: 10px; }
   .btn { flex: 1; background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text); font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; padding: 7px 8px; cursor: pointer; transition: all .15s ease; }
   .btn:hover { background: var(--c-surface-2); border-color: var(--c-border-2); }
@@ -215,7 +268,7 @@ const SETTINGS = {
   #footer .update b { color: var(--c-text); font-weight: 500; }
 
   .ac-marker { pointer-events: auto; }
-  .ac-wrap { width: 32px; height: 32px; margin: 0 auto; transition: transform .35s ease-out; position: relative; }
+  .ac-wrap { width: var(--wrap-size, 32px); height: var(--wrap-size, 32px); margin: 0 auto; transition: transform .35s ease-out; position: relative; }
   /* CSS sprite: icons.webp is 575×791 with 8 cols × ~11 rows; we display each cell at 32×32.
      Scaling 575→256 makes each cell exactly 32 wide. Pick a cell with background-position: -(col*32)px -(row*32)px. */
   .ac-spr { width: 100%; height: 100%; background-image: url('icons.webp'); background-size: 256px 352px; background-repeat: no-repeat; display: block; position: relative; z-index: 1; pointer-events: none; }
@@ -332,9 +385,27 @@ const SETTINGS = {
         <ul id="flight-log-list" class="flight-log"></ul>
       </section>
 
-      <section class="panel-section">
-        <div class="dev-header">
-          <h3 class="section-title" style="margin:0;flex:1;">DEV / SIM</h3>
+      <footer id="footer">
+        <div class="update"><span>UPD</span><b id="last-update">—</b></div>
+        <span>adsb.lol</span>
+      </footer>
+    </aside>
+  </div>
+
+  <!-- Floating DEV TOOLS open button (top-right of viewport) -->
+  <button id="dev-open-btn">⚙ DEV TOOLS</button>
+
+  <!-- Floating DEV TOOLS panel — hidden by default, opens via the button above -->
+  <div id="dev-panel" class="hidden">
+    <div class="dev-bar">
+      <span>DEV TOOLS</span>
+      <button id="dev-close-btn" title="Close">×</button>
+    </div>
+    <div class="dev-body">
+      <!-- ===== SIM MODE section ===== -->
+      <div class="dev-section">
+        <div class="dev-section-head">
+          <h4>SIM MODE</h4>
           <button class="btn" id="sim-toggle-btn" style="flex:0 0 auto;padding:4px 12px;">OFF</button>
         </div>
         <div id="sim-controls" style="display:none;margin-top:10px;">
@@ -352,17 +423,27 @@ const SETTINGS = {
             <button class="btn" id="sim-traffic-btn">⟳ NEW TRAFFIC</button>
           </div>
         </div>
-      </section>
+      </div>
 
-      <footer id="footer">
-        <div class="update"><span>UPD</span><b id="last-update">—</b></div>
-        <span>adsb.lol</span>
-      </footer>
-    </aside>
+      <!-- ===== ICON TESTER section ===== -->
+      <div class="dev-section">
+        <h4>ICON TESTER</h4>
+        <div class="dev-hint">Upload a PNG to preview it on Hackensack 2's marker. Tweak the sliders until it looks right, then click <b>COPY CONFIG</b> and paste the snippet to me.</div>
+        <input type="file" id="icon-upload" accept="image/png,image/webp,image/jpeg" />
+        <div class="icon-config-row"><label>SIZE</label><input type="range" id="icon-size-slider" min="20" max="96" step="1" value="32" /><span id="icon-size-readout">32px</span></div>
+        <div class="icon-config-row"><label>ROTATION</label><input type="range" id="icon-rot-slider" min="-180" max="180" step="1" value="0" /><span id="icon-rot-readout">0°</span></div>
+        <div class="icon-config-row"><label>ANCHOR Y</label><input type="range" id="icon-anchor-slider" min="-20" max="20" step="1" value="0" /><span id="icon-anchor-readout">0px</span></div>
+        <div class="btn-row">
+          <button class="btn" id="copy-icon-config-btn">📋 COPY CONFIG</button>
+          <button class="btn" id="reset-icon-btn">RESET</button>
+        </div>
+        <div id="icon-config-preview" class="config-preview">(upload an icon to start)</div>
+      </div>
+    </div>
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0030</div>
+  <div id="version">v.0031</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -592,6 +673,12 @@ function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   // can declare `mapIconRotation` to compensate (e.g. -90 if cockpit is on the right).
   const iconOffset = customIcon ? (fleetCfg?.mapIconRotation || 0) : 0;
   const rotation = (track + iconOffset + 360) % 360;
+  // Per-aircraft custom marker sizing (only meaningful with a custom mapIcon).
+  // Defaults to the sprite cell size (32). mapIconAnchorY shifts the geo point
+  // vertically — useful when the icon's visual centroid isn't dead-center.
+  const wrapSize = fleetCfg?.mapIconSize || 32;
+  const wrapSizeStyle = wrapSize !== 32 ? ` --wrap-size: ${wrapSize}px;` : '';
+  const anchorYAdj = fleetCfg?.mapIconAnchorY || 0;
   const colorVar=isBase?"--ac-color: var(--c-dim);":fleetCfg?`--ac-color: ${fleetCfg.color};`:isNear?"--ac-color: var(--c-warn);":"--ac-color: var(--c-traffic);";
   const label=fleetCfg?fleetCfg.label:(ac.flight?.trim()||ac.r||ac.hex||"");
   const line1Parts=[];
@@ -613,8 +700,12 @@ function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   }
   const line1=line1Parts.length?`<div class="ac-meta" style="${colorVar}">${line1Parts.join(" - ")}</div>`:"";
   const line2=line2Parts.length?`<div class="ac-meta" style="${colorVar}">${line2Parts.join(" · ")}</div>`:"";
-  const html=`<div class="ac-wrap" style="${colorVar} transform: rotate(${rotation}deg);">${iconMarkup}</div><div class="ac-label" style="${colorVar}">${label}</div>${line1}${line2}`;
-  return L.divIcon({className:classes.join(" "),html,iconSize:[48,64],iconAnchor:[24,16]});
+  const html=`<div class="ac-wrap" style="${colorVar}${wrapSizeStyle} transform: rotate(${rotation}deg);">${iconMarkup}</div><div class="ac-label" style="${colorVar}">${label}</div>${line1}${line2}`;
+  const iconW = wrapSize + 16;             // padding around wrap for the label/meta
+  const iconH = wrapSize + 32;
+  const anchorX = iconW / 2;
+  const anchorY = (wrapSize / 2) + anchorYAdj;
+  return L.divIcon({className:classes.join(" "),html,iconSize:[iconW,iconH],iconAnchor:[anchorX,anchorY]});
 }
 
 function popupHtml(ac,fleetCfg,primaryAc,isBase,fromLabel){
@@ -1036,6 +1127,119 @@ function initUI(){
     regenerateSimTraffic();
     if(state.sim.enabled)tick();
   });
+
+  // ===== DEV TOOLS panel open/close =====
+  const devOpen  = document.getElementById("dev-open-btn");
+  const devPanel = document.getElementById("dev-panel");
+  const devClose = document.getElementById("dev-close-btn");
+  devOpen.addEventListener("click", () => { devPanel.classList.remove("hidden"); devOpen.style.display = "none"; });
+  devClose.addEventListener("click", () => { devPanel.classList.add("hidden"); devOpen.style.display = ""; });
+
+  // ===== ICON TESTER =====
+  // Applies a user-uploaded image + size/rotation/anchor tweaks to N732HM
+  // (FLEET[0]) live, so you can see the marker render with the test settings.
+  // Spits out a paste-able snippet for me to drop into the FLEET entry.
+  state.iconTester = { saved: null, filename: "", iconDataUrl: null, size: 32, rotation: 0, anchorY: 0 };
+
+  function saveOriginalFleet0(){
+    if (state.iconTester.saved) return;
+    state.iconTester.saved = {
+      mapIcon:          FLEET[0].mapIcon,
+      mapIconRotation:  FLEET[0].mapIconRotation,
+      mapIconSize:      FLEET[0].mapIconSize,
+      mapIconAnchorY:   FLEET[0].mapIconAnchorY,
+    };
+  }
+  function restoreOriginalFleet0(){
+    if (!state.iconTester.saved) return;
+    const s = state.iconTester.saved;
+    if (s.mapIcon === undefined)         delete FLEET[0].mapIcon;         else FLEET[0].mapIcon = s.mapIcon;
+    if (s.mapIconRotation === undefined) delete FLEET[0].mapIconRotation; else FLEET[0].mapIconRotation = s.mapIconRotation;
+    if (s.mapIconSize === undefined)     delete FLEET[0].mapIconSize;     else FLEET[0].mapIconSize = s.mapIconSize;
+    if (s.mapIconAnchorY === undefined)  delete FLEET[0].mapIconAnchorY;  else FLEET[0].mapIconAnchorY = s.mapIconAnchorY;
+    state.iconTester.saved = null;
+  }
+
+  function applyTester(){
+    const t = state.iconTester;
+    if (!t.iconDataUrl) { restoreOriginalFleet0(); updateTesterPreview(); render(); return; }
+    saveOriginalFleet0();
+    FLEET[0].mapIcon         = t.iconDataUrl;
+    FLEET[0].mapIconRotation = t.rotation;
+    FLEET[0].mapIconSize     = t.size;
+    FLEET[0].mapIconAnchorY  = t.anchorY;
+    updateTesterPreview();
+    // Force markers to rebuild (they're keyed by hex; setIcon is called every tick anyway,
+    // but render() now picks up the new wrap-size/anchor immediately)
+    if (state.sim.enabled) tick(); else render();
+  }
+
+  function updateTesterPreview(){
+    const t = state.iconTester;
+    const el = document.getElementById("icon-config-preview");
+    if (!t.iconDataUrl) { el.textContent = "(upload an icon to start)"; return; }
+    const safeName = t.filename || "ICON.png";
+    el.textContent =
+      `mapIcon:         "map-icons/${safeName}",\n` +
+      `mapIconRotation: ${t.rotation},\n` +
+      `mapIconSize:     ${t.size},\n` +
+      `mapIconAnchorY:  ${t.anchorY},`;
+  }
+
+  document.getElementById("icon-upload").addEventListener("change", (e) => {
+    const file = e.target.files && e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (ev) => {
+      state.iconTester.iconDataUrl = ev.target.result;
+      state.iconTester.filename    = file.name;
+      applyTester();
+    };
+    reader.readAsDataURL(file);
+  });
+
+  function wireTesterSlider(id, readoutId, suffix, prop){
+    const s = document.getElementById(id), r = document.getElementById(readoutId);
+    s.addEventListener("input", () => {
+      const v = Number(s.value);
+      state.iconTester[prop] = v;
+      r.textContent = v + suffix;
+      applyTester();
+    });
+  }
+  wireTesterSlider("icon-size-slider",   "icon-size-readout",   "px", "size");
+  wireTesterSlider("icon-rot-slider",    "icon-rot-readout",    "°",  "rotation");
+  wireTesterSlider("icon-anchor-slider", "icon-anchor-readout", "px", "anchorY");
+
+  document.getElementById("copy-icon-config-btn").addEventListener("click", async () => {
+    const text = document.getElementById("icon-config-preview").textContent;
+    try { await navigator.clipboard.writeText(text); }
+    catch(e) { /* fallback: select the preview block */
+      const range = document.createRange(); range.selectNodeContents(document.getElementById("icon-config-preview"));
+      const sel = window.getSelection(); sel.removeAllRanges(); sel.addRange(range);
+    }
+    const btn = document.getElementById("copy-icon-config-btn");
+    const old = btn.textContent;
+    btn.textContent = "✓ COPIED";
+    setTimeout(() => { btn.textContent = old; }, 1200);
+  });
+
+  document.getElementById("reset-icon-btn").addEventListener("click", () => {
+    state.iconTester.iconDataUrl = null;
+    state.iconTester.filename    = "";
+    state.iconTester.size        = 32;
+    state.iconTester.rotation    = 0;
+    state.iconTester.anchorY     = 0;
+    document.getElementById("icon-size-slider").value   = 32;
+    document.getElementById("icon-rot-slider").value    = 0;
+    document.getElementById("icon-anchor-slider").value = 0;
+    document.getElementById("icon-size-readout").textContent   = "32px";
+    document.getElementById("icon-rot-readout").textContent    = "0°";
+    document.getElementById("icon-anchor-readout").textContent = "0px";
+    document.getElementById("icon-upload").value = "";
+    applyTester();
+  });
+
   document.getElementById("recenter-btn").addEventListener("click", fitAllFleet);
   document.getElementById("pause-btn").addEventListener("click",e=>{
     state.paused=!state.paused;
