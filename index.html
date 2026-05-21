@@ -342,7 +342,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0023</div>
+  <div id="version">v.0024</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -367,36 +367,39 @@ const Api=(()=>{
     ? WORKER_URL.trim().replace(/\/+$/,"") + "/v2"
     : null;
 
-  // Ordered list of strategies to try. First one that succeeds becomes sticky.
+  // Strategies tried in order on EVERY call (no sticky caching). The worker should
+  // almost always succeed; the others are last-resort fallbacks if the worker
+  // briefly hiccups or isn't configured.
   const STRATEGIES = [
     ...(workerBase ? [{ name:"worker",     url: p => workerBase + p }] : []),
     { name:"direct",     url: p => directBase + p },
     { name:"allorigins", url: p => `https://api.allorigins.win/raw?url=${encodeURIComponent(directBase + p)}` },
   ];
-  let activeIdx = 0;
+
+  const FETCH_TIMEOUT_MS = 5000;   // give up on a strategy after 5s and fall through to the next
 
   async function _fetchJson(url){
-    const res = await fetch(url, { method:"GET", headers:{ Accept:"application/json" } });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return res.json();
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
+    try {
+      const res = await fetch(url, { method:"GET", headers:{ Accept:"application/json" }, signal: ctrl.signal });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      return await res.json();
+    } finally {
+      clearTimeout(t);
+    }
   }
 
   async function _get(p){
     let lastErr;
-    for (let i = activeIdx; i < STRATEGIES.length; i++){
+    // Always start from the preferred strategy (worker). No activeIdx caching —
+    // a single transient failure shouldn't permanently downgrade the connection.
+    for (let i = 0; i < STRATEGIES.length; i++){
       try {
-        const json = await _fetchJson(STRATEGIES[i].url(p));
-        if (i !== activeIdx){
-          console.warn(`Switched API strategy to "${STRATEGIES[i].name}".`);
-          activeIdx = i;
-        }
-        return json;
+        return await _fetchJson(STRATEGIES[i].url(p));
       } catch(e){ lastErr = e; }
     }
-    const hint = workerBase
-      ? " Check that the Worker URL is correct and the worker is deployed."
-      : " Set up the Cloudflare Worker proxy — see SETUP-cloudflare.md.";
-    throw new Error(`can't reach adsb.lol (${lastErr?.message||"unknown"}).${hint}`);
+    throw new Error(`ADS-B feed unavailable (${lastErr?.message || "unknown"})`);
   }
 
   async function trafficNear(lat,lon,dN){const d=Math.max(1,Math.min(250,Math.round(dN)));const data=await _get(`/lat/${lat.toFixed(5)}/lon/${lon.toFixed(5)}/dist/${d}`);return data?.ac??[];}
