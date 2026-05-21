@@ -498,7 +498,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0037</div>
+  <div id="version">v.0038</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -688,14 +688,27 @@ function createAirportMarker(ap){
   return m;
 }
 
+function repaintAirports(){
+  airportsLayer.clearLayers();
+  if (airportsMode === "off") return;
+  const allowed = AIRPORT_MODE_TYPES[airportsMode] || new Set();
+  for (const ap of airportsCache) {
+    if (allowed.has(ap.type)) createAirportMarker(ap).addTo(airportsLayer);
+  }
+}
+
 async function refreshAirports(){
-  if (!workerLogBase || !airportsVisible) return;
+  if (!workerLogBase || airportsMode === "off") return;
   const b = map.getBounds();
   let n = b.getNorth(), s = b.getSouth(), e = b.getEast(), w = b.getWest();
-  // If we already loaded a bbox that fully covers the current view, skip refetch.
+  // If we already loaded a bbox that fully covers the current view, just repaint
+  // from cache (no network).
   if (lastAirportBbox &&
       n <= lastAirportBbox.n && s >= lastAirportBbox.s &&
-      e <= lastAirportBbox.e && w >= lastAirportBbox.w) return;
+      e <= lastAirportBbox.e && w >= lastAirportBbox.w) {
+    repaintAirports();
+    return;
+  }
   // Pad ~50% so we don't refetch on small pans.
   const padLat = (n - s) * 0.5, padLon = (e - w) * 0.5;
   n += padLat; s -= padLat; e += padLon; w -= padLon;
@@ -703,17 +716,15 @@ async function refreshAirports(){
     const res = await fetch(`${workerLogBase}/airports/bbox?n=${n.toFixed(4)}&s=${s.toFixed(4)}&e=${e.toFixed(4)}&w=${w.toFixed(4)}`);
     if (!res.ok) return;
     const data = await res.json();
-    airportsLayer.clearLayers();
-    for (const ap of (data.airports || [])) {
-      createAirportMarker(ap).addTo(airportsLayer);
-    }
+    airportsCache   = data.airports || [];
     lastAirportBbox = { n, s, e, w };
+    repaintAirports();
   } catch(err) {
     console.warn("airports fetch failed:", err);
   }
 }
 
-map.on("moveend", () => { if (airportsVisible) refreshAirports(); });
+map.on("moveend", () => { if (airportsMode !== "off") refreshAirports(); });
 
 /* ---------- worker /log/* base URL (for the flight log endpoints) ---------- */
 const workerLogBase = (typeof WORKER_URL === "string" && WORKER_URL.trim())
