@@ -277,7 +277,7 @@ const SETTINGS = {
      Scaling 575→256 makes each cell exactly 32 wide. Pick a cell with background-position: -(col*32)px -(row*32)px. */
   .ac-spr { width: 100%; height: 100%; background-image: url('icons.webp'); background-size: 256px 352px; background-repeat: no-repeat; display: block; position: relative; z-index: 1; pointer-events: none; }
   /* (background-position is set inline per category — see CATEGORY_SPRITE in the script block) */
-  .ac-glow { position: absolute; inset: -6px; border-radius: 50%; background: radial-gradient(circle, var(--ac-color) 0%, transparent 62%); opacity: 0.85; filter: blur(3px); pointer-events: none; z-index: 0; }
+  .ac-glow { position: absolute; inset: var(--glow-inset, -6px); border-radius: 50%; background: radial-gradient(circle, var(--glow-color, var(--ac-color)) 0%, transparent 62%); opacity: var(--glow-opacity, 0.85); filter: blur(3px); pointer-events: none; z-index: 0; }
   .ac-base .ac-glow { display: none; }
   .ac-base .ac-spr { filter: grayscale(1); opacity: 0.55; }
   .ac-himg.ac-near .ac-glow { background: radial-gradient(circle, var(--c-warn) 0%, transparent 62%); }
@@ -437,6 +437,9 @@ const SETTINGS = {
         <div class="icon-config-row"><label>SIZE</label><input type="range" id="icon-size-slider" min="20" max="96" step="1" value="32" /><span id="icon-size-readout">32px</span></div>
         <div class="icon-config-row"><label>ROTATION</label><input type="range" id="icon-rot-slider" min="-180" max="180" step="1" value="0" /><span id="icon-rot-readout">0°</span></div>
         <div class="icon-config-row"><label>ANCHOR Y</label><input type="range" id="icon-anchor-slider" min="-20" max="20" step="1" value="0" /><span id="icon-anchor-readout">0px</span></div>
+        <div class="icon-config-row"><label>GLOW OP</label><input type="range" id="icon-glow-op-slider" min="0" max="100" step="1" value="85" /><span id="icon-glow-op-readout">85%</span></div>
+        <div class="icon-config-row"><label>GLOW SIZE</label><input type="range" id="icon-glow-size-slider" min="0" max="30" step="1" value="6" /><span id="icon-glow-size-readout">6px</span></div>
+        <div class="icon-config-row"><label>GLOW COLOR</label><input type="color" id="icon-glow-color" value="#0080ff" style="flex:1;height:24px;border:1px solid var(--c-border);background:none;cursor:pointer;" /><span id="icon-glow-color-readout">#0080ff</span></div>
         <div class="btn-row">
           <button class="btn" id="copy-icon-config-btn">📋 COPY CONFIG</button>
           <button class="btn" id="reset-icon-btn">RESET</button>
@@ -447,7 +450,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0032</div>
+  <div id="version">v.0033</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -683,6 +686,15 @@ function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   const wrapSize = fleetCfg?.mapIconSize || 32;
   const wrapSizeStyle = wrapSize !== 32 ? ` --wrap-size: ${wrapSize}px;` : '';
   const anchorYAdj = fleetCfg?.mapIconAnchorY || 0;
+
+  // Per-aircraft glow tuning. The radial halo underneath fleet markers is driven by
+  // these CSS variables; each fleet entry can override any of them.
+  const glowOpacity = fleetCfg && fleetCfg.mapGlowOpacity != null ? fleetCfg.mapGlowOpacity : 0.85;
+  const glowSize    = fleetCfg && fleetCfg.mapGlowSize    != null ? fleetCfg.mapGlowSize    : 6;
+  const glowColor   = fleetCfg?.mapGlowColor || null;
+  const glowStyle   = fleetCfg
+    ? ` --glow-opacity: ${glowOpacity}; --glow-inset: ${-glowSize}px;${glowColor ? ` --glow-color: ${glowColor};` : ''}`
+    : '';
   const colorVar=isBase?"--ac-color: var(--c-dim);":fleetCfg?`--ac-color: ${fleetCfg.color};`:isNear?"--ac-color: var(--c-warn);":"--ac-color: var(--c-traffic);";
   const label=fleetCfg?fleetCfg.label:(ac.flight?.trim()||ac.r||ac.hex||"");
   const line1Parts=[];
@@ -704,7 +716,7 @@ function buildIcon({ac,fleetCfg,isNear,primaryAc,isBase}){
   }
   const line1=line1Parts.length?`<div class="ac-meta" style="${colorVar}">${line1Parts.join(" - ")}</div>`:"";
   const line2=line2Parts.length?`<div class="ac-meta" style="${colorVar}">${line2Parts.join(" · ")}</div>`:"";
-  const html=`<div class="ac-wrap" style="${colorVar}${wrapSizeStyle} transform: rotate(${rotation}deg);">${iconMarkup}</div><div class="ac-label" style="${colorVar}">${label}</div>${line1}${line2}`;
+  const html=`<div class="ac-wrap" style="${colorVar}${wrapSizeStyle}${glowStyle} transform: rotate(${rotation}deg);">${iconMarkup}</div><div class="ac-label" style="${colorVar}">${label}</div>${line1}${line2}`;
   const iconW = wrapSize + 16;             // padding around wrap for the label/meta
   const iconH = wrapSize + 32;
   const anchorX = iconW / 2;
@@ -1161,7 +1173,13 @@ function initUI(){
   // Applies a user-uploaded image + size/rotation/anchor tweaks to N732HM
   // (FLEET[0]) live, so you can see the marker render with the test settings.
   // Spits out a paste-able snippet for me to drop into the FLEET entry.
-  state.iconTester = { saved: null, filename: "", iconDataUrl: null, size: 32, rotation: 0, anchorY: 0 };
+  // Initial glow color in the tester defaults to the test target's company color.
+  const _testerInitColor = (FLEET[0]?.mapGlowColor || FLEET[0]?.color || "#0080ff");
+  state.iconTester = {
+    saved: null, filename: "", iconDataUrl: null,
+    size: 32, rotation: 0, anchorY: 0,
+    glowOpacity: 0.85, glowSize: 6, glowColor: _testerInitColor,
+  };
 
   function saveOriginalFleet0(){
     if (state.iconTester.saved) return;
@@ -1170,15 +1188,17 @@ function initUI(){
       mapIconRotation:  FLEET[0].mapIconRotation,
       mapIconSize:      FLEET[0].mapIconSize,
       mapIconAnchorY:   FLEET[0].mapIconAnchorY,
+      mapGlowOpacity:   FLEET[0].mapGlowOpacity,
+      mapGlowSize:      FLEET[0].mapGlowSize,
+      mapGlowColor:     FLEET[0].mapGlowColor,
     };
   }
   function restoreOriginalFleet0(){
     if (!state.iconTester.saved) return;
     const s = state.iconTester.saved;
-    if (s.mapIcon === undefined)         delete FLEET[0].mapIcon;         else FLEET[0].mapIcon = s.mapIcon;
-    if (s.mapIconRotation === undefined) delete FLEET[0].mapIconRotation; else FLEET[0].mapIconRotation = s.mapIconRotation;
-    if (s.mapIconSize === undefined)     delete FLEET[0].mapIconSize;     else FLEET[0].mapIconSize = s.mapIconSize;
-    if (s.mapIconAnchorY === undefined)  delete FLEET[0].mapIconAnchorY;  else FLEET[0].mapIconAnchorY = s.mapIconAnchorY;
+    const restore = (k) => { if (s[k] === undefined) delete FLEET[0][k]; else FLEET[0][k] = s[k]; };
+    restore("mapIcon"); restore("mapIconRotation"); restore("mapIconSize"); restore("mapIconAnchorY");
+    restore("mapGlowOpacity"); restore("mapGlowSize"); restore("mapGlowColor");
     state.iconTester.saved = null;
   }
 
@@ -1190,9 +1210,10 @@ function initUI(){
     FLEET[0].mapIconRotation = t.rotation;
     FLEET[0].mapIconSize     = t.size;
     FLEET[0].mapIconAnchorY  = t.anchorY;
+    FLEET[0].mapGlowOpacity  = t.glowOpacity;
+    FLEET[0].mapGlowSize     = t.glowSize;
+    FLEET[0].mapGlowColor    = t.glowColor;
     updateTesterPreview();
-    // Force markers to rebuild (they're keyed by hex; setIcon is called every tick anyway,
-    // but render() now picks up the new wrap-size/anchor immediately)
     if (state.sim.enabled) tick(); else render();
   }
 
@@ -1205,7 +1226,10 @@ function initUI(){
       `mapIcon:         "map-icons/${safeName}",\n` +
       `mapIconRotation: ${t.rotation},\n` +
       `mapIconSize:     ${t.size},\n` +
-      `mapIconAnchorY:  ${t.anchorY},`;
+      `mapIconAnchorY:  ${t.anchorY},\n` +
+      `mapGlowOpacity:  ${t.glowOpacity.toFixed(2)},\n` +
+      `mapGlowSize:     ${t.glowSize},\n` +
+      `mapGlowColor:    "${t.glowColor}",`;
   }
 
   document.getElementById("icon-upload").addEventListener("change", (e) => {
@@ -1233,6 +1257,23 @@ function initUI(){
   wireTesterSlider("icon-rot-slider",    "icon-rot-readout",    "°",  "rotation");
   wireTesterSlider("icon-anchor-slider", "icon-anchor-readout", "px", "anchorY");
 
+  // Glow opacity slider stores % in the UI but 0–1 in state for the CSS variable.
+  document.getElementById("icon-glow-op-slider").addEventListener("input", (e) => {
+    const pct = Number(e.target.value);
+    state.iconTester.glowOpacity = pct / 100;
+    document.getElementById("icon-glow-op-readout").textContent = pct + "%";
+    applyTester();
+  });
+  wireTesterSlider("icon-glow-size-slider", "icon-glow-size-readout", "px", "glowSize");
+
+  document.getElementById("icon-glow-color").addEventListener("input", (e) => {
+    state.iconTester.glowColor = e.target.value;
+    document.getElementById("icon-glow-color-readout").textContent = e.target.value;
+    applyTester();
+  });
+  document.getElementById("icon-glow-color-readout").textContent = state.iconTester.glowColor;
+  document.getElementById("icon-glow-color").value = state.iconTester.glowColor;
+
   document.getElementById("copy-icon-config-btn").addEventListener("click", async () => {
     const text = document.getElementById("icon-config-preview").textContent;
     try { await navigator.clipboard.writeText(text); }
@@ -1252,12 +1293,21 @@ function initUI(){
     state.iconTester.size        = 32;
     state.iconTester.rotation    = 0;
     state.iconTester.anchorY     = 0;
-    document.getElementById("icon-size-slider").value   = 32;
-    document.getElementById("icon-rot-slider").value    = 0;
-    document.getElementById("icon-anchor-slider").value = 0;
-    document.getElementById("icon-size-readout").textContent   = "32px";
-    document.getElementById("icon-rot-readout").textContent    = "0°";
-    document.getElementById("icon-anchor-readout").textContent = "0px";
+    state.iconTester.glowOpacity = 0.85;
+    state.iconTester.glowSize    = 6;
+    state.iconTester.glowColor   = _testerInitColor;
+    document.getElementById("icon-size-slider").value     = 32;
+    document.getElementById("icon-rot-slider").value      = 0;
+    document.getElementById("icon-anchor-slider").value   = 0;
+    document.getElementById("icon-glow-op-slider").value  = 85;
+    document.getElementById("icon-glow-size-slider").value = 6;
+    document.getElementById("icon-glow-color").value      = _testerInitColor;
+    document.getElementById("icon-size-readout").textContent       = "32px";
+    document.getElementById("icon-rot-readout").textContent        = "0°";
+    document.getElementById("icon-anchor-readout").textContent     = "0px";
+    document.getElementById("icon-glow-op-readout").textContent    = "85%";
+    document.getElementById("icon-glow-size-readout").textContent  = "6px";
+    document.getElementById("icon-glow-color-readout").textContent = _testerInitColor;
     document.getElementById("icon-upload").value = "";
     applyTester();
   });
