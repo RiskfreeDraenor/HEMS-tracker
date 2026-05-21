@@ -232,6 +232,22 @@ export class TrackerDO {
       return new Response(JSON.stringify({ airport: ap }), { headers: jhdrs });
     }
 
+    if (url.pathname === "/log/airports/bbox") {
+      const n = parseFloat(url.searchParams.get("n"));
+      const s = parseFloat(url.searchParams.get("s"));
+      const e = parseFloat(url.searchParams.get("e"));
+      const w = parseFloat(url.searchParams.get("w"));
+      if (![n,s,e,w].every(Number.isFinite)) {
+        return new Response(JSON.stringify({ error: "need n,s,e,w query params" }), { status: 400, headers: jhdrs });
+      }
+      const rs = await this.env.DB.prepare(
+        `SELECT ident, name, type, lat, lon FROM airports
+         WHERE lat BETWEEN ? AND ? AND lon BETWEEN ? AND ?
+         LIMIT 2000`
+      ).bind(s, n, w, e).all();
+      return new Response(JSON.stringify({ airports: rs.results || [] }), { headers: jhdrs });
+    }
+
     if (url.pathname === "/log/heartbeat") {
       return new Response(JSON.stringify({ ok: true, t: Date.now() }), { headers: jhdrs });
     }

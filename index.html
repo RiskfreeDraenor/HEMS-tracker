@@ -276,6 +276,12 @@ const SETTINGS = {
   .btn { flex: 1; background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text); font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; padding: 7px 8px; cursor: pointer; transition: all .15s ease; }
   .btn:hover { background: var(--c-surface-2); border-color: var(--c-border-2); }
   .btn.paused { background: var(--c-warn); color: var(--c-bg); border-color: var(--c-warn); }
+  .btn.active { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+
+  /* Airport overlay popup uses .ac-popup styling already; mark airport circles
+     as pointer-friendly so clicks land. Leaflet's circleMarker has its own
+     cursor handling, so this is mostly defensive. */
+  .leaflet-interactive { cursor: pointer; }
 
   #traffic-list { list-style: none; margin: 0; padding: 0; }
   .traf-row { padding: 8px 10px; border-left: 2px solid transparent; border-bottom: 1px solid var(--c-border); cursor: pointer; transition: background .12s ease; }
@@ -399,6 +405,9 @@ const SETTINGS = {
           <button class="btn" id="recenter-btn">⊙ FIT ALL FLEET</button>
           <button class="btn" id="pause-btn">❚❚ PAUSE</button>
         </div>
+        <div class="btn-row">
+          <button class="btn" id="airports-toggle-btn">⊕ SHOW AIRPORTS</button>
+        </div>
       </section>
 
       <section class="panel-section scroll">
@@ -472,7 +481,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0035</div>
+  <div id="version">v.0036</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -623,7 +632,63 @@ const fleetLayer=L.layerGroup().addTo(map);
 const ringsLayer=L.layerGroup().addTo(map);
 const trailsLayer=L.layerGroup().addTo(map);
 const flightTrackLayer=L.layerGroup().addTo(map);
+const airportsLayer=L.layerGroup();   // not added to map yet — toggled via the "SHOW AIRPORTS" button
 const markerByHex=new Map();
+
+/* ---------- Airport overlay (subtle dots per type) ---------- */
+let airportsVisible = false;
+let lastAirportBbox = null;
+
+function createAirportMarker(ap){
+  // Styled subtly so nothing competes with aircraft markers for attention.
+  let style;
+  if (ap.type === "heliport") {
+    style = { radius: 4, color: "#88aacc", fillColor: "transparent", weight: 1.5, opacity: 0.55 };
+  } else if (ap.type === "large_airport") {
+    style = { radius: 6, color: "#aaccee", fillColor: "#1a2236", fillOpacity: 0.6, weight: 1.4, opacity: 0.75 };
+  } else if (ap.type === "medium_airport") {
+    style = { radius: 4.5, color: "#8aa6c8", fillColor: "#1a2236", fillOpacity: 0.55, weight: 1.2, opacity: 0.65 };
+  } else {
+    style = { radius: 2.8, color: "#6a7a96", fillColor: "#1a2236", fillOpacity: 0.5, weight: 1, opacity: 0.5 };
+  }
+  const m = L.circleMarker([ap.lat, ap.lon], style);
+  const safeName = (ap.name || "").replace(/&/g,"&amp;").replace(/</g,"&lt;");
+  const typeLabel = (ap.type || "").replace(/_/g," ").toUpperCase();
+  m.bindPopup(
+    `<div class="pop"><div class="pop-title">${ap.ident || "—"}</div>` +
+    `<div class="pop-row"><span>NAME</span><b>${safeName}</b></div>` +
+    `<div class="pop-row"><span>TYPE</span><b>${typeLabel}</b></div></div>`,
+    { className: "ac-popup", closeButton: false, offset: [0, -4] }
+  );
+  return m;
+}
+
+async function refreshAirports(){
+  if (!workerLogBase || !airportsVisible) return;
+  const b = map.getBounds();
+  let n = b.getNorth(), s = b.getSouth(), e = b.getEast(), w = b.getWest();
+  // If we already loaded a bbox that fully covers the current view, skip refetch.
+  if (lastAirportBbox &&
+      n <= lastAirportBbox.n && s >= lastAirportBbox.s &&
+      e <= lastAirportBbox.e && w >= lastAirportBbox.w) return;
+  // Pad ~50% so we don't refetch on small pans.
+  const padLat = (n - s) * 0.5, padLon = (e - w) * 0.5;
+  n += padLat; s -= padLat; e += padLon; w -= padLon;
+  try {
+    const res = await fetch(`${workerLogBase}/airports/bbox?n=${n.toFixed(4)}&s=${s.toFixed(4)}&e=${e.toFixed(4)}&w=${w.toFixed(4)}`);
+    if (!res.ok) return;
+    const data = await res.json();
+    airportsLayer.clearLayers();
+    for (const ap of (data.airports || [])) {
+      createAirportMarker(ap).addTo(airportsLayer);
+    }
+    lastAirportBbox = { n, s, e, w };
+  } catch(err) {
+    console.warn("airports fetch failed:", err);
+  }
+}
+
+map.on("moveend", () => { if (airportsVisible) refreshAirports(); });
 
 /* ---------- worker /log/* base URL (for the flight log endpoints) ---------- */
 const workerLogBase = (typeof WORKER_URL === "string" && WORKER_URL.trim())
@@ -1335,6 +1400,20 @@ function initUI(){
   });
 
   document.getElementById("recenter-btn").addEventListener("click", fitAllFleet);
+  document.getElementById("airports-toggle-btn").addEventListener("click", (e) => {
+    airportsVisible = !airportsVisible;
+    if (airportsVisible) {
+      map.addLayer(airportsLayer);
+      e.currentTarget.classList.add("active");
+      e.currentTarget.textContent = "⊕ HIDE AIRPORTS";
+      lastAirportBbox = null;
+      refreshAirports();
+    } else {
+      map.removeLayer(airportsLayer);
+      e.currentTarget.classList.remove("active");
+      e.currentTarget.textContent = "⊕ SHOW AIRPORTS";
+    }
+  });
   document.getElementById("pause-btn").addEventListener("click",e=>{
     state.paused=!state.paused;
     e.currentTarget.textContent=state.paused?"▶ RESUME":"❚❚ PAUSE";
