@@ -1,0 +1,30 @@
+# Cloudflare Workers config for the hemstracker worker.
+#
+# Deploy with:   wrangler deploy
+# (run from the project root with wrangler logged in to your Cloudflare account)
+
+name               = "hemstracker"
+main               = "cloudflare-worker.js"
+compatibility_date = "2025-01-01"
+account_id         = "6c4492af8a0afd7932369b4b7a997bc7"
+
+# ---- D1 database binding (env.DB in worker code) --------------------------
+[[d1_databases]]
+binding       = "DB"
+database_name = "hemstracker-logs"
+database_id   = "2111153b-bb23-418d-8671-505c9cb83938"
+
+# ---- Durable Object binding (env.TRACKER_DO in worker code) ---------------
+[[durable_objects.bindings]]
+name       = "TRACKER_DO"
+class_name = "TrackerDO"
+
+# Declares TrackerDO as a new class on first deploy. Required by Cloudflare
+# whenever you introduce a new DO class.
+[[migrations]]
+tag         = "v1"
+new_classes = ["TrackerDO"]
+
+# ---- Cron heartbeat (wakes the DO if its 3s alarm ever stalls) ------------
+[triggers]
+crons = ["* * * * *"]

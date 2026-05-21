@@ -236,6 +236,28 @@ const SETTINGS = {
 
   #version { position: fixed; bottom: 6px; left: 6px; z-index: 1000; font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; color: var(--c-muted); background: rgba(10,14,26,.8); padding: 3px 8px; border: 1px solid var(--c-border); pointer-events: none; }
 
+  #fleet-panel { max-height: 32vh; overflow-y: auto; }
+  #fleet-panel::-webkit-scrollbar { width: 6px; }
+  #fleet-panel::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
+
+  .flight-log { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; }
+  .flight-log::-webkit-scrollbar { width: 6px; }
+  .flight-log::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
+  .flight-row { padding: 8px 10px; border-left: 3px solid var(--ac-color, var(--c-fleet)); border-bottom: 1px solid var(--c-border); cursor: pointer; transition: background .12s ease; }
+  .flight-row:last-child { border-bottom: none; }
+  .flight-row:hover { background: var(--c-surface); }
+  .flight-row.active { background: var(--c-surface-2); }
+  .flight-row.active::after { content: "▸ TRACK"; float: right; font-size: 9px; letter-spacing: .15em; color: var(--ac-color); margin-left: 8px; }
+  .flight-row.airborne .flight-call::before { content: "● "; color: var(--c-ok); }
+  .flight-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 3px; }
+  .flight-call { font-weight: 600; font-size: 11px; letter-spacing: .04em; color: var(--ac-color); }
+  .flight-time { font-size: 10px; color: var(--c-muted); letter-spacing: .05em; }
+  .flight-stats { display: flex; gap: 12px; font-size: 10px; color: var(--c-muted); letter-spacing: .03em; }
+  .flight-stats b { color: var(--c-text); font-weight: 500; }
+  .flight-empty { padding: 18px 10px; text-align: center; color: var(--c-dim); font-size: 11px; letter-spacing: .15em; }
+  .btn-clear-track { background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text); font-family: var(--f-mono); font-size: 9px; letter-spacing: .12em; padding: 2px 6px; cursor: pointer; }
+  .btn-clear-track:hover { background: var(--c-surface-2); }
+
   @media (max-width: 800px) {
     #app { grid-template-columns: 1fr; grid-template-rows: 48px 1fr 280px; grid-template-areas: "topbar" "map" "panel"; }
     #panel { border-left: none; border-top: 1px solid var(--c-border); }
@@ -247,7 +269,7 @@ const SETTINGS = {
     <header id="topbar">
       <div class="brand">
         <span class="mark">◉ HEMS TRACKER</span>
-        <span class="sub">N732HM · OPERATIONS</span>
+        <span class="sub" id="fleet-summary">— FLEET</span>
       </div>
       <div class="statusline">
         <span><span id="status-dot" class="status-dot"></span> <span id="status-text">CONNECTING…</span></span>
@@ -274,7 +296,7 @@ const SETTINGS = {
         </div>
         <input type="range" id="alt-slider" />
         <div class="btn-row">
-          <button class="btn" id="recenter-btn">⊙ CENTER ON 732HM</button>
+          <button class="btn" id="recenter-btn">⊙ FIT ALL FLEET</button>
           <button class="btn" id="pause-btn">❚❚ PAUSE</button>
         </div>
       </section>
@@ -282,6 +304,11 @@ const SETTINGS = {
       <section class="panel-section scroll">
         <h3 class="section-title">TRAFFIC <span class="count" id="traffic-count">0</span></h3>
         <ul id="traffic-list"></ul>
+      </section>
+
+      <section class="panel-section">
+        <h3 class="section-title">FLIGHT LOG <span class="count" id="flight-count">0</span> <button class="btn-clear-track" id="clear-track-btn" style="display:none;">CLEAR TRACK</button></h3>
+        <ul id="flight-log-list" class="flight-log"></ul>
       </section>
 
       <section class="panel-section">
@@ -314,7 +341,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0018</div>
+  <div id="version">v.0019</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -461,7 +488,30 @@ const trafficLayer=L.layerGroup().addTo(map);
 const fleetLayer=L.layerGroup().addTo(map);
 const ringsLayer=L.layerGroup().addTo(map);
 const trailsLayer=L.layerGroup().addTo(map);
+const flightTrackLayer=L.layerGroup().addTo(map);
 const markerByHex=new Map();
+
+/* ---------- worker /log/* base URL (for the flight log endpoints) ---------- */
+const workerLogBase = (typeof WORKER_URL === "string" && WORKER_URL.trim())
+  ? WORKER_URL.trim().replace(/\/+$/, "") + "/log"
+  : null;
+
+/* ---------- Fit map to encompass all fleet aircraft/bases ---------- */
+function fitAllFleet(){
+  const pts = [];
+  for (const cfg of FLEET) {
+    if (cfg.base && Number.isFinite(cfg.base.lat) && Number.isFinite(cfg.base.lon)) {
+      pts.push([cfg.base.lat, cfg.base.lon]);
+    }
+    const ac = state.fleet[cfg.registration];
+    if (ac && Number.isFinite(ac.lat) && Number.isFinite(ac.lon)) {
+      pts.push([ac.lat, ac.lon]);
+    }
+  }
+  if (pts.length === 0) { map.setView([BASE_LOCATION.lat, BASE_LOCATION.lon], 8, {animate:true}); return; }
+  if (pts.length === 1) { map.setView(pts[0], 11, {animate:true}); return; }
+  map.fitBounds(pts, { padding: [60, 60], maxZoom: 11, animate: true });
+}
 
 const HELI_SVG=`<svg viewBox="-12 -12 24 24" class="ac-svg"><line x1="-9" y1="-9" x2="9" y2="9" class="ac-rotor" stroke-width="1.2"/><line x1="9" y1="-9" x2="-9" y2="9" class="ac-rotor" stroke-width="1.2"/><rect x="-0.8" y="3" width="1.6" height="6" class="ac-body"/><rect x="-2.6" y="8.5" width="5.2" height="1" class="ac-body"/><rect x="-5" y="-1" width="2.5" height="2.5" class="ac-body"/><rect x="2.5" y="-1" width="2.5" height="2.5" class="ac-body"/><rect x="-2.6" y="-3" width="5.2" height="6" rx="1" class="ac-body"/><ellipse cx="0" cy="-4" rx="1.8" ry="2.5" class="ac-body"/></svg>`;
 const PLANE_SVG=`<svg viewBox="-12 -12 24 24" class="ac-svg"><path d="M0,-10 L2.2,-4 L10,2 L10,4 L2,3 L1.5,8 L4,10 L4,11 L0,10 L-4,11 L-4,10 L-1.5,8 L-2,3 L-10,4 L-10,2 L-2.2,-4 Z" class="ac-body"/></svg>`;
@@ -657,6 +707,98 @@ function renderPanel(primaryAc,trafficItems){
   document.getElementById("last-update").textContent=ts;
   document.getElementById("status-dot").className="status-dot "+(state.lastError?"err":"ok");
   document.getElementById("status-text").textContent=state.lastError?`ERR: ${state.lastError}`:"LIVE";
+
+  // Fleet summary in topbar — N airborne / total
+  const totalFleet = FLEET.length;
+  const airborne = FLEET.filter(cfg => {
+    const a = state.fleet[cfg.registration];
+    return a && !isOnGround(a) && Number.isFinite(a.lat);
+  }).length;
+  const fs = document.getElementById("fleet-summary");
+  if (fs) fs.textContent = `${airborne}/${totalFleet} AIRBORNE · ${totalFleet} FLEET`;
+}
+
+/* ---------- Flight log fetch + render ---------- */
+async function fetchFlights(){
+  if (!workerLogBase) return [];
+  try {
+    const res = await fetch(`${workerLogBase}/flights?limit=30`);
+    if (!res.ok) return [];
+    const data = await res.json();
+    return data.flights || [];
+  } catch(e) {
+    console.warn("fetchFlights failed:", e);
+    return [];
+  }
+}
+
+async function showFlightTrack(flightId, color){
+  if (!workerLogBase) return;
+  try {
+    const res = await fetch(`${workerLogBase}/flight/${encodeURIComponent(flightId)}/track`);
+    if (!res.ok) return;
+    const data = await res.json();
+    const pts = (data.points || []).map(p => [p.lat, p.lon]).filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+
+    flightTrackLayer.clearLayers();
+    if (pts.length < 2) return;
+
+    L.polyline(pts, { color: color || "#FFB800", weight: 3, opacity: 0.95 }).addTo(flightTrackLayer);
+    L.circleMarker(pts[0], { radius: 6, color: color, fillColor: "#0a0e1a", fillOpacity: 1, weight: 2 }).addTo(flightTrackLayer).bindPopup("Takeoff");
+    L.circleMarker(pts[pts.length-1], { radius: 6, color: color, fillColor: color, fillOpacity: 1, weight: 2 }).addTo(flightTrackLayer).bindPopup("Landing");
+
+    const bounds = L.latLngBounds(pts);
+    map.fitBounds(bounds, { padding: [60, 60] });
+    document.getElementById("clear-track-btn").style.display = "";
+  } catch(e) {
+    console.warn("showFlightTrack failed:", e);
+  }
+}
+
+function clearFlightTrack(){
+  flightTrackLayer.clearLayers();
+  document.querySelectorAll("#flight-log-list .flight-row.active").forEach(r => r.classList.remove("active"));
+  document.getElementById("clear-track-btn").style.display = "none";
+}
+
+function renderFlightLog(flights){
+  const list = document.getElementById("flight-log-list");
+  const count = document.getElementById("flight-count");
+  if (!list || !count) return;
+  count.textContent = flights.length;
+  if (flights.length === 0) {
+    list.innerHTML = `<li class="flight-empty">No flights logged yet</li>`;
+    return;
+  }
+  list.innerHTML = flights.map(f => {
+    const cfg = FLEET.find(c => c.registration === f.reg);
+    const color = cfg?.color || "#FFB800";
+    const label = cfg?.label || f.reg;
+    const takeoff = new Date(f.takeoff_time);
+    const dateStr = takeoff.toLocaleString("en-US", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", hour12:false});
+    const airborne = f.landing_time == null;
+    const duration = airborne ? "AIRBORNE" : (f.duration_sec ? `${Math.floor(f.duration_sec/60)}m ${f.duration_sec%60}s` : "—");
+    const maxAlt = f.max_alt_ft ? `${Math.round(f.max_alt_ft).toLocaleString()}ft` : "—";
+    const maxSpd = f.max_speed_kt ? `${Math.round(f.max_speed_kt)}kt` : "—";
+    const dist = (f.distance_nm != null && f.distance_nm > 0) ? `${f.distance_nm.toFixed(1)}nm` : "—";
+    return `<li class="flight-row ${airborne?"airborne":""}" data-flight-id="${f.id}" data-color="${color}" style="--ac-color:${color}">
+      <div class="flight-top"><span class="flight-call">${label}</span><span class="flight-time">${dateStr} · ${duration}</span></div>
+      <div class="flight-stats"><span>ALT <b>${maxAlt}</b></span><span>SPD <b>${maxSpd}</b></span><span>DIST <b>${dist}</b></span></div>
+    </li>`;
+  }).join("");
+
+  list.querySelectorAll(".flight-row").forEach(row => {
+    row.addEventListener("click", () => {
+      list.querySelectorAll(".flight-row").forEach(r => r.classList.remove("active"));
+      row.classList.add("active");
+      showFlightTrack(row.dataset.flightId, row.dataset.color);
+    });
+  });
+}
+
+async function tickFlightLog(){
+  const flights = await fetchFlights();
+  renderFlightLog(flights);
 }
 
 async function tick(){
@@ -728,11 +870,7 @@ function initUI(){
     regenerateSimTraffic();
     if(state.sim.enabled)tick();
   });
-  document.getElementById("recenter-btn").addEventListener("click",()=>{
-    const ac=state.fleet[primary.registration];
-    if(ac)map.setView([ac.lat,ac.lon],12,{animate:true});
-    else map.setView([BASE_LOCATION.lat,BASE_LOCATION.lon],11,{animate:true});
-  });
+  document.getElementById("recenter-btn").addEventListener("click", fitAllFleet);
   document.getElementById("pause-btn").addEventListener("click",e=>{
     state.paused=!state.paused;
     e.currentTarget.textContent=state.paused?"▶ RESUME":"❚❚ PAUSE";
@@ -744,8 +882,13 @@ function initUI(){
 
 window.addEventListener("DOMContentLoaded",()=>{
   initUI();
+  document.getElementById("clear-track-btn").addEventListener("click", clearFlightTrack);
   tick();
-  setInterval(tick,SETTINGS.refreshIntervalMs);
+  setInterval(tick, SETTINGS.refreshIntervalMs);
+  tickFlightLog();
+  setInterval(tickFlightLog, 15000);   // refresh flight log every 15s
+  // Once the first tick lands fleet data, fit the map to all fleet bases/positions
+  setTimeout(fitAllFleet, 500);
 });
 </script>
 </body>
