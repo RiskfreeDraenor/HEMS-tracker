@@ -288,6 +288,32 @@ const SETTINGS = {
   }
   .btn-select.active { background-color: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
   .btn-select option { background: var(--c-bg-2); color: var(--c-text); }
+  .airports-labels-toggle {
+    display: flex; align-items: center; gap: 8px;
+    margin-top: 8px; padding: 0 2px;
+    font-size: 10px; letter-spacing: .2em; color: var(--c-muted);
+    cursor: pointer; user-select: none;
+  }
+  .airports-labels-toggle input[type="checkbox"] {
+    accent-color: var(--c-fleet); cursor: pointer; margin: 0;
+  }
+
+  /* Tiny static label under each airport circle when "show names" is on. */
+  .leaflet-tooltip.ap-label {
+    background: rgba(10,14,26,0.78);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    color: #aaccee;
+    font-family: var(--f-mono);
+    font-size: 9px;
+    font-weight: 500;
+    letter-spacing: .04em;
+    padding: 1px 4px;
+    white-space: nowrap;
+    pointer-events: none;
+  }
+  .leaflet-tooltip.ap-label::before { display: none; }   /* hide the arrow */
 
   /* Airport overlay popup uses .ac-popup styling already; mark airport circles
      as pointer-friendly so clicks land. Leaflet's circleMarker has its own
@@ -425,6 +451,9 @@ const SETTINGS = {
             <option value="all">⊕ ALL</option>
           </select>
         </div>
+        <label class="airports-labels-toggle">
+          <input type="checkbox" id="airports-labels-check" /> SHOW NAMES
+        </label>
       </section>
 
       <section class="panel-section scroll">
@@ -498,7 +527,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0038</div>
+  <div id="version">v.0039</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -661,6 +690,7 @@ const AIRPORT_MODE_TYPES = {
   all:       new Set(["small_airport", "medium_airport", "large_airport", "heliport", "seaplane_base"]),
 };
 let airportsMode  = "off";
+let airportsShowLabels = false;
 let lastAirportBbox = null;
 let airportsCache   = [];   // server response cached so mode changes don't re-fetch
 
@@ -685,6 +715,9 @@ function createAirportMarker(ap){
     `<div class="pop-row"><span>TYPE</span><b>${typeLabel}</b></div></div>`,
     { className: "ac-popup", closeButton: false, offset: [0, -4] }
   );
+  if (airportsShowLabels && ap.ident) {
+    m.bindTooltip(ap.ident, { permanent: true, direction: "bottom", offset: [0, 4], className: "ap-label" });
+  }
   return m;
 }
 
@@ -1448,6 +1481,10 @@ function initUI(){
       e.target.classList.add("active");
       refreshAirports();
     }
+  });
+  document.getElementById("airports-labels-check").addEventListener("change", (e) => {
+    airportsShowLabels = e.target.checked;
+    if (airportsMode !== "off") repaintAirports();
   });
   document.getElementById("pause-btn").addEventListener("click",e=>{
     state.paused=!state.paused;
