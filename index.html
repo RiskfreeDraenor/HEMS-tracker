@@ -454,8 +454,36 @@ const SETTINGS = {
   .btn-clear-track:hover { background: var(--c-surface-2); }
 
   @media (max-width: 800px) {
-    #app { grid-template-columns: 1fr; grid-template-rows: 48px 1fr 280px; grid-template-areas: "topbar" "map" "panel"; }
+    #app { grid-template-columns: 1fr; grid-template-rows: 48px 1fr clamp(300px, 55vh, 520px); grid-template-areas: "topbar" "map" "panel"; }
     #panel { border-left: none; border-top: 1px solid var(--c-border); }
+  }
+
+  /* ===== Compact phone mode (<=600px) — fit topbar in a 375px viewport ===== */
+  @media (max-width: 600px) {
+    /* Brand shrinks; FLEET summary tucked away to save room */
+    #topbar { padding: 0 10px; }
+    .brand { gap: 8px; letter-spacing: .08em; }
+    .brand .mark { font-size: 12px; }
+    #fleet-summary { display: none; }
+
+    /* LIVE status — just the colored dot, drop the text */
+    .statusline #status-text { display: none; }
+    .statusline { gap: 0; }
+
+    /* OPTIONS / TRAFFIC become icon-only buttons (text label hidden, icon + count remain) */
+    .topbar-right { gap: 6px; }
+    .topbar-left  { gap: 10px; min-width: 0; }
+    #options-open-btn, #traffic-open-btn { padding: 6px 9px; gap: 4px; }
+    .btn-text { display: none; }
+    .btn-icon { font-size: 13px; }
+
+    /* Hide DEV button on phones — it's a desktop power-user tool */
+    #dev-open-btn { display: none; }
+
+    /* Per-card history button: tighter padding so it doesn't crowd the card */
+    .fc-history-btn { padding: 2px 5px; font-size: 9px; bottom: 5px; right: 5px; }
+    /* Leave a bit of right-padding inside cards so the absolute button doesn't overlap text */
+    .fleet-card { padding-right: 16px; }
   }
   </style>
 </head>
@@ -472,8 +500,8 @@ const SETTINGS = {
         </div>
       </div>
       <div class="topbar-right">
-        <button id="options-open-btn">⚙ OPTIONS</button>
-        <button id="traffic-open-btn">📡 TRAFFIC <span id="traffic-count-btn">0</span></button>
+        <button id="options-open-btn"><span class="btn-icon">⚙</span><span class="btn-text">OPTIONS</span></button>
+        <button id="traffic-open-btn"><span class="btn-icon">📡</span><span class="btn-text">TRAFFIC</span><span id="traffic-count-btn">0</span></button>
       </div>
     </header>
 
@@ -607,7 +635,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0041</div>
+  <div id="version">v.0042</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
