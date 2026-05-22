@@ -32,6 +32,8 @@ states. Eventually 15–20 aircraft across multiple operators. Priorities, in or
    (airport → airport), duration, max alt, max speed, distance, replayable track.
 4. **Multi-aircraft, multi-company** layout — no aircraft is "the center"; the
    user picks who's focused by clicking a fleet card.
+5. **Visual polish per aircraft** — each fleet entry can carry a custom map
+   icon, a background photo on its card, and per-aircraft glow tuning.
 
 Things explicitly **not** important to the user (as of the last session):
 - Emergency squawk highlighting (cool but not a priority)
@@ -57,10 +59,15 @@ Things explicitly **not** important to the user (as of the last session):
   adsb.lol via bbox, runs a state machine on each fleet aircraft, writes flight
   records to D1. The cron is a heartbeat in case the alarm stalls.
 - **D1 `hemstracker-logs`**: 5 tables — `aircraft_state`, `flights`,
-  `track_points`, `airports` (25,097 US heliports/airports from OurAirports).
+  `track_points`, `airports` (~25k US heliports/airports from OurAirports).
 - **Sprite system**: `icons.webp` (the public adsbx aircraft sprite, 575×791,
   ~8 cols × 11 rows of ~72×72 cells). Per-category cells mapped in
-  `CATEGORY_SPRITE` near the top of `index.html`. 1-indexed.
+  `CATEGORY_SPRITE` near the top of `index.html`. **1-indexed.**
+- **Per-aircraft custom icons**: `map-icons/*.png` files override the sprite
+  cell for specific FLEET entries (Hackensack and RWJ both use `ec135.png` /
+  `ec135LifeFlight.png` from this folder).
+- **Per-aircraft card photos**: `pictures/*.png` files render as a dimmed
+  background inside each fleet card on the right panel.
 
 ### State machine knobs (cloudflare-worker.js)
 
@@ -82,13 +89,15 @@ Things explicitly **not** important to the user (as of the last session):
 
 ## 4. File map
 
-| File | What it is |
+| Path | What it is |
 |---|---|
 | `index.html` | The entire frontend. Single page. Leaflet for the map. |
-| `cloudflare-worker.js` | The worker code (proxy + DO + `/log/*` endpoints). |
+| `cloudflare-worker.js` | Worker code (proxy + DO + `/log/*` endpoints). |
 | `wrangler.toml` | wrangler deploy config — bindings, migrations, cron. |
 | `populate-airports.mjs` | One-off (safe to re-run) Node script that fetches OurAirports CSV and bulk-imports US airports into D1 via `wrangler d1 execute`. |
 | `icons.webp` | Aircraft sprite (adsbx public icons). Sprite math: 256×352 scaled, each cell 32×32. |
+| `map-icons/` | Per-aircraft PNG icons that override the sprite cell. Currently: `ec135.png`, `ec135LifeFlight.png`, `AW139Trooper.png`. |
+| `pictures/` | Per-aircraft photos that render as a faded background on each fleet card. Currently: `732hm.png`, `511HU.png`, `n456mt.png`. |
 | `CNAME` | Just `hemsnj.com` for GitHub Pages. |
 | `SETUP-cloudflare.md` | Original end-user worker setup walkthrough — outdated now (predates DO). Doesn't hurt anything. |
 | `HANDOFF.md` | This document. |
@@ -107,7 +116,33 @@ These are sticky. Honor them by default — they have memory notes backing them.
 | **No addresses in the UI.** Base addresses are positioning input only. Never render them in cards or popups. The airport DB name (e.g., "Ocean University Medical Center Heliport") wins over `FLEET[i].base.name` when both match. | `feedback_no_address_in_ui.md` |
 | **Grid coordinates are 1-indexed.** When user says "row 6 col 7", that's the 6th row down and 7th col from left, both starting at 1. | `feedback_one_indexed_grids.md` |
 
-## 6. Process timeline (high-level)
+## 6. Per-aircraft FLEET fields (full reference)
+
+Every aircraft entry in the `FLEET` array in `index.html` can carry these
+fields. Required ones are starred. Defaults shown in parentheses.
+
+| Field | Example | Notes |
+|---|---|---|
+| `registration`* | `"N732HM"` | Tail number. Also key in worker's `FLEET_REGS`. |
+| `label`* | `"Hackensack 2"` | Short callsign shown on map + cards. |
+| `color`* | `"#0080ff"` | Company color (one per company). |
+| `kind`* | `"helicopter"` | Or `"fixed-wing"`. Drives sprite category fallback. |
+| `company`* | `"Hackensack"` | Groups cards in the right panel. |
+| `isPrimary` | `true` | At most one. Sets initial focused aircraft on page load. |
+| `base`* | `{ lat, lon, name }` | lat/lon required. `name` is internal; never shown. |
+| `image` | `"pictures/732hm.png"` | Dimmed background on the fleet card. Optional. |
+| `mapIcon` | `"map-icons/ec135.png"` | Per-aircraft PNG marker, overrides sprite cell. Optional. |
+| `mapIconRotation` (0) | `-90` | Degrees added to track. Use when the icon's "front" isn't drawn pointing up. |
+| `mapIconSize` (32) | `75` | Wrap size in px. Bigger = more detailed icon on the map. |
+| `mapIconAnchorY` (0) | `0` | Vertical pixel offset of the marker's geo anchor. Trail connects here. |
+| `mapGlowOpacity` (0.85) | `0.16` | 0 to disable the halo, 1 for full. |
+| `mapGlowSize` (6) | `0` | Pixels outward beyond the wrap. 0 = halo flush with the icon. |
+| `mapGlowColor` (`color`) | `"#0767f8"` | Halo color; falls back to the company color. |
+
+The **icon tester** in the floating DEV TOOLS panel produces a paste-able
+snippet of these icon/glow fields — see Section 9.
+
+## 7. Process timeline (high-level)
 
 1. **Initial setup** — Cloudflare Worker proxy for adsb.lol, GitHub repo,
    GitHub Pages, custom domain hemsnj.com with HTTPS.
@@ -139,35 +174,72 @@ These are sticky. Honor them by default — they have memory notes backing them.
    worker hiccup), 5-sec fetch timeouts, parallel `warmStart` + `tick`,
    immediate `render()` on `DOMContentLoaded`, default MAX ALTITUDE raised
    to 3000 ft.
+8. **Per-aircraft visual layer (v.0028–0030)** — fleet cards got a `image`
+   field rendering a dim photo background; introduced `mapIcon` +
+   `mapIconRotation` so each aircraft can override the sprite cell with its
+   own PNG. Hackensacks switched to the `ec135.png` photo-style icon.
+9. **Floating DEV TOOLS panel (v.0031–0033)** — DEV/SIM is no longer pinned
+   in the right sidebar; it's a floating overlay opened with `⚙ DEV TOOLS`
+   top-right. New ICON TESTER section: upload any PNG locally, scrub size /
+   rotation / anchor / **glow opacity, size, and color** with sliders, copy
+   a paste-able snippet of the resulting fields. While an icon is uploaded
+   the tester forces a synthetic in-flight state on N732HM so the marker
+   renders full-color (not the dim grey base styling).
+10. **Tuned EC135 + new aircraft (v.0034–0035)** — applied final Hackensack
+    EC135 tuning (`-90°` rotation, size `75`, glow opacity `0.16`, glow size
+    `0`, glow color `#0767f8`). Added **N456MT "RWJB1"** under a new company
+    **"RWJ Life Flight"** (color `#E63946`, base KMJX Ocean County Airport).
+    The right-panel FLEET section auto-groups by company.
+11. **Airport overlay (v.0036–0039)** — new `/log/airports/bbox` worker
+    endpoint serves airports from D1 by bounding box. Browser added a mode
+    dropdown in the controls section (OFF / AIRPORTS ONLY / HELIPORTS ONLY /
+    MAJOR AIRPORTS / ALL) and a `SHOW NAMES` checkbox that toggles a small
+    ICAO label under each marker. Client caches the bbox response so mode
+    flips and name toggles repaint instantly; only big map pans re-fetch.
 
-## 7. Current state
+## 8. Current state
 
-- **Live at hemsnj.com**, version `v.0027`.
-- **Fleet (2 aircraft):**
-  - `N732HM` — "Hackensack 2", base 40.078262 / -74.132108
-    (Ocean University Medical Center Heliport in OurAirports).
-  - `N551HU` — "Hackensack 1", base 41.1327789 / -74.3405939
-    (Greenwood Lake Airport area).
-  - Both under company `"Hackensack"`, color `#0080ff` (blue).
+- **Live at hemsnj.com**, version `v.0039`.
+- **Fleet (3 aircraft, 2 companies):**
+  - `N732HM` — "Hackensack 2", base 40.078262 / -74.132108 (Ocean University
+    Medical Center Heliport). Custom EC135 icon, blue.
+  - `N551HU` — "Hackensack 1", base 41.1327789 / -74.3405939 (Greenwood Lake
+    Airport area). Same EC135 icon, blue.
+  - `N456MT` — "RWJB1", base 39.9288 / -74.2953 (KMJX Ocean County Airport).
+    LifeFlight EC135 icon, red `#E63946`. Company `"RWJ Life Flight"`.
 - **Worker**: deployed via `wrangler deploy`. DO + D1 + cron all active.
-- **D1**: `airports` populated (~25k US heliports + airports), `flights` empty
-  (no flights logged yet because both Hackensacks have been parked).
+- **D1**: `airports` populated (~25k US heliports + airports), `flights`
+  empty (no flights logged yet because the user's fleet hasn't been airborne
+  during a session).
 
-## 8. Outstanding / likely next requests
+## 9. Outstanding / likely next requests
 
 - **More aircraft.** User explicitly plans 15–20. When they give you a tail
   number + base location (address OR lat/lon — either is fine), you add a
   FLEET entry in `index.html` AND extend `FLEET_REGS` in `cloudflare-worker.js`,
   then `wrangler deploy`. Match the company color or assign a new one (see
   `feedback_company_color.md`).
+- **Per-aircraft icon tuning.** User uses the **icon tester** in DEV TOOLS to
+  produce snippets like:
+  ```
+  mapIcon:         "map-icons/ec135LifeFlight.png",
+  mapIconRotation: -90,
+  mapIconSize:     75,
+  mapIconAnchorY:  0,
+  mapGlowOpacity:  0.16,
+  mapGlowSize:     0,
+  mapGlowColor:    "#E63946",
+  ```
+  Just paste those fields into the FLEET entry. The PNG must already exist
+  in `map-icons/` (or you commit it yourself if they send one).
 - **Manual sprite rework.** User has said they'll re-pick sprite cells for
-  some/all categories. Just listen to row/col (1-indexed) and update
+  some/all categories. Just listen to row/col (**1-indexed**) and update
   `CATEGORY_SPRITE` in `index.html`.
-- **Real flight in D1.** Once a Hackensack flies for real, you can verify
+- **Real flight in D1.** Once a fleet aircraft flies for real, you can verify
   end-to-end logging (takeoff time, landing time, airport-to-airport line in
-  the FLIGHT LOG panel). Until then, sim-mode in the right panel is the
-  closest thing — but sim is browser-only and doesn't hit the DO, so it
-  won't generate D1 entries.
+  the FLIGHT LOG panel). Until then, sim-mode in the DEV TOOLS is the closest
+  thing — but sim is browser-only and doesn't hit the DO, so it won't
+  generate D1 entries.
 - **Smarter fleet polling.** The browser currently calls `/v2/reg/<reg>` per
   aircraft each tick. At 15–20 aircraft that's 15–20 calls of ~1 sec each. If
   responsiveness degrades, switch the browser to a single bbox query and
@@ -175,7 +247,7 @@ These are sticky. Honor them by default — they have memory notes backing them.
   browser read fleet state from `/log/state` and let the DO be the only thing
   hitting adsb.lol for fleet positions.
 
-## 9. How to do common operations
+## 10. How to do common operations
 
 ### Add an aircraft
 1. In `index.html`, append a new `FLEET` entry. Required: `registration`,
@@ -184,7 +256,9 @@ These are sticky. Honor them by default — they have memory notes backing them.
 2. If you only got an address: geocode it. Either follow a Google Maps short
    link (the redirect URL contains `@lat,lon`), or query Nominatim
    (`https://nominatim.openstreetmap.org/search?q=…&format=json&limit=1`).
-   Be respectful to Nominatim — set a `User-Agent` header.
+   Be respectful to Nominatim — set a `User-Agent` header. Or call our own
+   worker's `/log/airport?lat=&lon=` for a nearest-airport lookup against
+   OurAirports (saves you from picking a `base.name` by hand).
 3. In `cloudflare-worker.js`, add the registration to `FLEET_REGS`.
 4. `cd "C:\Users\ddt19\Documents\tracker\files" && wrangler deploy` (the user's
    wrangler is authed; `PATH` is `/c/Users/ddt19/AppData/Roaming/npm` +
@@ -202,19 +276,28 @@ These are sticky. Honor them by default — they have memory notes backing them.
   pushes `cloudflare-worker.js`. New `[[migrations]]` entries are how you'd
   evolve the DO class if you ever change it.
 
+### Use the icon tester (you don't, the user does)
+- Open the floating panel via the `⚙ DEV TOOLS` button (top-right of map).
+- User uploads a PNG locally → applies live to N732HM's marker → scrubs the
+  sliders (size, rotation, anchor Y, glow opacity, glow size, glow color)
+  until it looks right → clicks `📋 COPY CONFIG`.
+- They paste the snippet into chat; you splice it into the right FLEET entry.
+- If the PNG isn't in `map-icons/` yet, the user usually puts it there before
+  asking you to wire it in. Verify with `ls "map-icons/"`.
+
 ### Re-import airports (rare)
 - `node populate-airports.mjs` — re-fetches OurAirports, regenerates
   `airports.sql`, runs `wrangler d1 execute hemstracker-logs --file=airports.sql --remote`.
   Safe to re-run; first SQL statement is `DELETE FROM airports`.
 
-### Find / change an icon
+### Find / change a sprite icon
 1. View `icons.webp` (Read tool works for images). Count cells **1-indexed**:
    row 1 = top, col 1 = leftmost.
 2. Update the relevant entry in `CATEGORY_SPRITE` in `index.html`. The math is:
    `background-position: -((col-1)*32)px -((row-1)*32)px`. The script computes
    this automatically from the `[row, col]` tuple.
 
-## 10. Useful endpoints + commands cheat sheet
+## 11. Useful endpoints + commands cheat sheet
 
 ```bash
 # Worker health
@@ -235,6 +318,9 @@ curl 'https://hemstracker.deltasteelfox92.workers.dev/log/flight/<flight-id>/tra
 # Nearest airport for a lat/lon (debug / sanity check)
 curl 'https://hemstracker.deltasteelfox92.workers.dev/log/airport?lat=40.078&lon=-74.132'
 
+# All airports within a bbox (powers the airport overlay)
+curl 'https://hemstracker.deltasteelfox92.workers.dev/log/airports/bbox?n=41.5&s=39.5&e=-73.5&w=-75.5'
+
 # Live position of one aircraft (browser uses this per-fleet per-tick)
 curl https://hemstracker.deltasteelfox92.workers.dev/v2/reg/N732HM
 ```
@@ -249,12 +335,14 @@ wrangler tail
 # Direct query on D1
 wrangler d1 execute hemstracker-logs --remote --command "SELECT * FROM aircraft_state"
 wrangler d1 execute hemstracker-logs --remote --command "SELECT * FROM flights ORDER BY takeoff_time DESC LIMIT 10"
+wrangler d1 execute hemstracker-logs --remote --command "SELECT COUNT(*) FROM airports"
 ```
 
 ---
 
 **TL;DR for the next session:** Read the memory files. Read this doc. The user
-will probably hand you more tail numbers + addresses to add to the fleet, or ask
-you to re-pick some sprite icons. Bump the version, deploy the worker if you
-touched it, push to GitHub. Don't make the page look like it revolves around any
-single aircraft — the user has multiple operators on the way.
+will probably hand you more tail numbers + addresses to add to the fleet, paste
+you an icon-tester snippet to wire into an aircraft, or ask you to re-pick some
+sprite icons. Bump the version, deploy the worker if you touched it, push to
+GitHub. Don't make the page look like it revolves around any single aircraft —
+the user has multiple operators on the way.
