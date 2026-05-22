@@ -219,35 +219,72 @@ const SETTINGS = {
   .sim-row label { font-size: 10px; letter-spacing: .25em; color: var(--c-muted); }
   .sim-row span { font-size: 13px; font-weight: 600; color: var(--c-fleet); letter-spacing: .05em; }
 
-  /* ===== Floating DEV TOOLS panel ===== */
-  #dev-open-btn {
-    position: fixed; top: 58px; right: 16px; z-index: 1400;
+  /* ===== Floating panels (OPTIONS, TRAFFIC, HISTORY, DEV TOOLS) ===== */
+  /* Trigger buttons (DEV TOOLS now lives bottom-left; OPTIONS/TRAFFIC stack top-right) */
+  #dev-open-btn, #options-open-btn, #traffic-open-btn {
+    position: fixed; z-index: 1400;
     background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
     font-family: var(--f-mono); font-size: 10px; letter-spacing: .2em; font-weight: 600;
     padding: 7px 12px; cursor: pointer; transition: all .15s ease;
   }
-  #dev-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+  #options-open-btn { top: 58px; right: 16px; }
+  #traffic-open-btn { top: 92px; right: 16px; }
+  #dev-open-btn    { bottom: 6px; left: 100px; padding: 4px 10px; font-size: 9px; }
+  #options-open-btn:hover, #dev-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+  #traffic-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-traffic); color: var(--c-traffic); }
 
-  #dev-panel {
-    position: fixed; top: 58px; right: 16px; z-index: 1500;
+  /* Floating panel containers (share styling; positions differ) */
+  #dev-panel, #options-panel, #traffic-panel, #history-panel {
+    position: fixed; z-index: 1500;
     width: 360px; max-height: calc(100vh - 80px);
     background: var(--c-bg-2); border: 1px solid var(--c-border-2);
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
     display: flex; flex-direction: column;
   }
-  #dev-panel.hidden { display: none; }
-  .dev-bar {
+  #dev-panel    { bottom: 36px; left: 16px; }
+  #options-panel{ top: 130px; right: 16px; max-height: calc(100vh - 150px); }
+  #traffic-panel{ top: 130px; right: 16px; max-height: calc(100vh - 150px); }
+  #history-panel{ top: 130px; right: 16px; width: 400px; max-height: calc(100vh - 150px); }
+  #dev-panel.hidden, #options-panel.hidden, #traffic-panel.hidden, #history-panel.hidden { display: none; }
+
+  /* Shared bar / body / close-btn for all floating panels */
+  .dev-bar, .float-bar {
     display: flex; align-items: center; justify-content: space-between;
     padding: 8px 14px; border-bottom: 1px solid var(--c-border);
     background: linear-gradient(180deg, var(--c-bg), var(--c-bg-2));
   }
-  .dev-bar span { font-size: 11px; letter-spacing: .3em; color: var(--c-fleet); font-weight: 600; }
-  #dev-close-btn {
+  .dev-bar span, .float-bar .float-title { font-size: 11px; letter-spacing: .3em; color: var(--c-fleet); font-weight: 600; }
+  .float-bar .float-title.traffic { color: var(--c-traffic); }
+  #dev-close-btn, .float-close-btn {
     background: none; border: none; color: var(--c-muted);
     font-size: 22px; line-height: 1; cursor: pointer; padding: 0 6px;
   }
-  #dev-close-btn:hover { color: var(--c-warn); }
-  .dev-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
+  #dev-close-btn:hover, .float-close-btn:hover { color: var(--c-warn); }
+  .dev-body, .float-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
+
+  /* Per-card HISTORY button — bottom-right corner of each fleet card */
+  .fc-history-btn {
+    position: absolute; bottom: 6px; right: 6px; z-index: 2;
+    background: rgba(10,14,26,0.55); border: 1px solid var(--c-border-2); color: var(--c-muted);
+    font-family: var(--f-mono); font-size: 9px; letter-spacing: .15em; font-weight: 600;
+    padding: 2px 6px; cursor: pointer; transition: all .15s ease;
+  }
+  .fc-history-btn:hover { background: var(--c-surface); border-color: var(--ac-color, var(--c-fleet)); color: var(--ac-color, var(--c-fleet)); }
+
+  /* History panel — date dividers + reset row */
+  .flight-date-header {
+    font-size: 9px; letter-spacing: .25em; color: var(--c-muted);
+    padding: 10px 4px 5px; text-transform: uppercase; font-weight: 600;
+    border-bottom: 1px solid var(--c-border); margin-bottom: 4px;
+  }
+  .flight-date-header:first-child { padding-top: 0; }
+  .history-empty { padding: 22px 10px; text-align: center; color: var(--c-dim); font-size: 11px; letter-spacing: .15em; }
+  .history-reset-row { padding: 8px 14px; border-top: 1px solid var(--c-border); display: flex; justify-content: flex-end; }
+
+  /* Right panel slimmed: fleet section takes all available height */
+  .panel-section.fleet-section { flex: 1; overflow-y: auto; display: flex; flex-direction: column; min-height: 0; }
+  .panel-section.fleet-section::-webkit-scrollbar { width: 6px; }
+  .panel-section.fleet-section::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
   .dev-section + .dev-section { margin-top: 18px; padding-top: 14px; border-top: 1px solid var(--c-border); }
   .dev-section-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
   .dev-section h4 { font-size: 10px; letter-spacing: .3em; color: var(--c-muted); margin: 0 0 8px; font-weight: 600; }
@@ -270,7 +307,9 @@ const SETTINGS = {
     white-space: pre-wrap; line-height: 1.5; user-select: all;
   }
   @media (max-width: 800px) {
-    #dev-panel { width: calc(100vw - 32px); right: 16px; left: 16px; }
+    #dev-panel, #options-panel, #traffic-panel, #history-panel {
+      width: calc(100vw - 32px); right: 16px; left: 16px;
+    }
   }
   .btn-row { display: flex; gap: 6px; margin-top: 10px; }
   .btn { flex: 1; background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text); font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; padding: 7px 8px; cursor: pointer; transition: all .15s ease; }
@@ -378,9 +417,8 @@ const SETTINGS = {
 
   #version { position: fixed; bottom: 6px; left: 6px; z-index: 1000; font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; color: var(--c-muted); background: rgba(10,14,26,.8); padding: 3px 8px; border: 1px solid var(--c-border); pointer-events: none; }
 
-  #fleet-panel { max-height: 32vh; overflow-y: auto; }
-  #fleet-panel::-webkit-scrollbar { width: 6px; }
-  #fleet-panel::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
+  /* Fleet panel now expands to fill the right column — scrolling lives on .panel-section.fleet-section */
+  #fleet-panel { flex: 1; }
 
   .flight-log { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; }
   .flight-log::-webkit-scrollbar { width: 6px; }
@@ -422,48 +460,9 @@ const SETTINGS = {
     <main id="map"></main>
 
     <aside id="panel">
-      <section class="panel-section">
+      <section class="panel-section fleet-section">
         <h3 class="section-title">FLEET</h3>
         <div id="fleet-panel"></div>
-      </section>
-
-      <section class="panel-section">
-        <div class="radius-row">
-          <label for="radius-slider">SCAN RADIUS</label>
-          <span id="radius-readout">10 nm</span>
-        </div>
-        <input type="range" id="radius-slider" />
-        <div class="radius-row" style="margin-top:10px;">
-          <label for="alt-slider">MAX ALTITUDE</label>
-          <span id="alt-readout">3,000 ft</span>
-        </div>
-        <input type="range" id="alt-slider" />
-        <div class="btn-row">
-          <button class="btn" id="recenter-btn">⊙ FIT ALL FLEET</button>
-          <button class="btn" id="pause-btn">❚❚ PAUSE</button>
-        </div>
-        <div class="btn-row">
-          <select class="btn btn-select" id="airports-mode-select">
-            <option value="off">⊕ AIRPORTS: OFF</option>
-            <option value="airports">⊕ AIRPORTS ONLY</option>
-            <option value="heliports">⊕ HELIPORTS ONLY</option>
-            <option value="large">⊕ MAJOR AIRPORTS</option>
-            <option value="all">⊕ ALL</option>
-          </select>
-        </div>
-        <label class="airports-labels-toggle">
-          <input type="checkbox" id="airports-labels-check" /> SHOW NAMES
-        </label>
-      </section>
-
-      <section class="panel-section scroll">
-        <h3 class="section-title">TRAFFIC <span class="count" id="traffic-count">0</span></h3>
-        <ul id="traffic-list"></ul>
-      </section>
-
-      <section class="panel-section">
-        <h3 class="section-title">FLIGHT LOG <span class="count" id="flight-count">0</span> <button class="btn-clear-track" id="clear-track-btn" style="display:none;">CLEAR TRACK</button></h3>
-        <ul id="flight-log-list" class="flight-log"></ul>
       </section>
 
       <footer id="footer">
@@ -473,8 +472,73 @@ const SETTINGS = {
     </aside>
   </div>
 
-  <!-- Floating DEV TOOLS open button (top-right of viewport) -->
-  <button id="dev-open-btn">⚙ DEV TOOLS</button>
+  <!-- Floating panel triggers — OPTIONS + TRAFFIC stacked top-right of map -->
+  <button id="options-open-btn">⚙ OPTIONS</button>
+  <button id="traffic-open-btn">📡 TRAFFIC <span id="traffic-count-btn">0</span></button>
+
+  <!-- DEV TOOLS lives bottom-left next to the version label now -->
+  <button id="dev-open-btn">🛠 DEV</button>
+
+  <!-- OPTIONS floating panel — all map controls live here -->
+  <div id="options-panel" class="hidden">
+    <div class="float-bar">
+      <span class="float-title">⚙ OPTIONS</span>
+      <button class="float-close-btn" data-target="options-panel" title="Close">×</button>
+    </div>
+    <div class="float-body">
+      <div class="radius-row">
+        <label for="radius-slider">SCAN RADIUS</label>
+        <span id="radius-readout">10 nm</span>
+      </div>
+      <input type="range" id="radius-slider" />
+      <div class="radius-row" style="margin-top:10px;">
+        <label for="alt-slider">MAX ALTITUDE</label>
+        <span id="alt-readout">3,000 ft</span>
+      </div>
+      <input type="range" id="alt-slider" />
+      <div class="btn-row">
+        <button class="btn" id="recenter-btn">⊙ FIT ALL FLEET</button>
+        <button class="btn" id="pause-btn">❚❚ PAUSE</button>
+      </div>
+      <div class="btn-row">
+        <select class="btn btn-select" id="airports-mode-select">
+          <option value="off">⊕ AIRPORTS: OFF</option>
+          <option value="airports">⊕ AIRPORTS ONLY</option>
+          <option value="heliports">⊕ HELIPORTS ONLY</option>
+          <option value="large">⊕ MAJOR AIRPORTS</option>
+          <option value="all">⊕ ALL</option>
+        </select>
+      </div>
+      <label class="airports-labels-toggle">
+        <input type="checkbox" id="airports-labels-check" /> SHOW NAMES
+      </label>
+    </div>
+  </div>
+
+  <!-- TRAFFIC floating panel — nearby aircraft around the focused fleet aircraft -->
+  <div id="traffic-panel" class="hidden">
+    <div class="float-bar">
+      <span class="float-title traffic">📡 TRAFFIC <span class="count" id="traffic-count">0</span></span>
+      <button class="float-close-btn" data-target="traffic-panel" title="Close">×</button>
+    </div>
+    <div class="float-body" style="padding: 0;">
+      <ul id="traffic-list"></ul>
+    </div>
+  </div>
+
+  <!-- HISTORY floating panel — opened from each fleet card's 📋 button -->
+  <div id="history-panel" class="hidden">
+    <div class="float-bar">
+      <span class="float-title" id="history-title">📋 HISTORY</span>
+      <button class="float-close-btn" data-target="history-panel" title="Close">×</button>
+    </div>
+    <div class="float-body" style="padding: 0 14px;">
+      <ul id="history-list" class="flight-log"></ul>
+    </div>
+    <div class="history-reset-row">
+      <button class="btn" id="history-reset-btn" style="display:none;">⊘ CLEAR TRACK</button>
+    </div>
+  </div>
 
   <!-- Floating DEV TOOLS panel — hidden by default, opens via the button above -->
   <div id="dev-panel" class="hidden">
@@ -527,7 +591,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0039</div>
+  <div id="version">v.0040</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1025,21 +1089,29 @@ function renderPanel(primaryAc,trafficItems){
       const focusCls=state.focusedReg===cfg.registration?" focused":"";
       const imgCls = cfg.image ? " has-img" : "";
       const imgStyle = cfg.image ? `; --ac-bg: url('${cfg.image}')` : "";
-      if(!ac)return `<div class="fleet-card offline${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div></div>`;
+      const histBtn = `<button class="fc-history-btn" data-history-reg="${cfg.registration}" title="Flight history">📋 HIST</button>`;
+      if(!ac)return `<div class="fleet-card offline${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div>${histBtn}</div>`;
       const onGnd=isOnGround(ac);
-      return `<div class="fleet-card ${onGnd?"ground":"airborne"}${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div></div>`;
+      return `<div class="fleet-card ${onGnd?"ground":"airborne"}${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div>${histBtn}</div>`;
     }).join("");
     sections.push(`<div class="company-group"><div class="company-header">${companyName}</div>${cards}</div>`);
   }
   document.getElementById("fleet-panel").innerHTML=sections.join("");
   document.querySelectorAll("#fleet-panel .fleet-card").forEach(card=>{
-    card.addEventListener("click",()=>{
+    card.addEventListener("click",(e)=>{
+      if (e.target.closest(".fc-history-btn")) return;   // history button handled below
       const reg=card.dataset.reg, cfg=FLEET.find(c=>c.registration===reg), ac=state.fleet[reg];
       state.focusedReg=reg;
       if(ac&&Number.isFinite(ac.lat)&&Number.isFinite(ac.lon))map.setView([ac.lat,ac.lon],Math.max(map.getZoom(),12),{animate:true});
       else if(cfg&&cfg.base)map.setView([cfg.base.lat,cfg.base.lon],Math.max(map.getZoom(),12),{animate:true});
       render();
       tick();    // re-fetch traffic around the newly-focused aircraft
+    });
+  });
+  document.querySelectorAll("#fleet-panel .fc-history-btn").forEach(btn => {
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      showHistory(btn.dataset.historyReg);
     });
   });
 
@@ -1056,7 +1128,10 @@ function renderPanel(primaryAc,trafficItems){
     return `<li class="traf-row ${isNear?"near":""}" data-hex="${ac.hex}"><div class="tr-main"><span class="tr-call">${call}</span><span class="tr-type">${ac.t||""}</span></div><div class="tr-sub"><span>${fmtAltitude(ac.alt_baro)}</span><span>${fmtSpeed(ac.gs)}</span><span>${fmtDistance(d)} ${compassOctant(b)}</span></div></li>`;
   }).join("");
 
-  document.getElementById("traffic-count").textContent=list.length;
+  const _tcEl  = document.getElementById("traffic-count");
+  const _tcBtn = document.getElementById("traffic-count-btn");
+  if (_tcEl)  _tcEl.textContent  = list.length;
+  if (_tcBtn) _tcBtn.textContent = list.length;
   document.getElementById("traffic-list").innerHTML=rows||`<li class="traf-empty">No traffic in radius</li>`;
 
   document.querySelectorAll(".traf-row").forEach(row=>{
@@ -1093,16 +1168,34 @@ function renderPanel(primaryAc,trafficItems){
   if (fs) fs.textContent = `${airborne}/${totalFleet} AIRBORNE · ${totalFleet} FLEET`;
 }
 
-/* ---------- Flight log fetch + render ---------- */
-async function fetchFlights(){
+/* ---------- Floating-panel mutex (OPTIONS / TRAFFIC / HISTORY share one screen slot) ---------- */
+const TOP_RIGHT_PANELS = ["options-panel", "traffic-panel", "history-panel"];
+function openPanel(id){
+  for (const pid of TOP_RIGHT_PANELS) {
+    const p = document.getElementById(pid);
+    if (p) p.classList.toggle("hidden", pid !== id);
+  }
+}
+function closePanel(id){
+  const p = document.getElementById(id);
+  if (p) p.classList.add("hidden");
+}
+function togglePanel(id){
+  const p = document.getElementById(id);
+  if (!p) return;
+  if (p.classList.contains("hidden")) openPanel(id); else closePanel(id);
+}
+
+/* ---------- Per-aircraft flight history (opened from each fleet card's 📋 button) ---------- */
+async function fetchFlightsForReg(reg){
   if (!workerLogBase) return [];
   try {
-    const res = await fetch(`${workerLogBase}/flights?limit=30`);
+    const res = await fetch(`${workerLogBase}/flights?reg=${encodeURIComponent(reg)}&limit=200`);
     if (!res.ok) return [];
     const data = await res.json();
     return data.flights || [];
   } catch(e) {
-    console.warn("fetchFlights failed:", e);
+    console.warn("fetchFlightsForReg failed:", e);
     return [];
   }
 }
@@ -1124,7 +1217,8 @@ async function showFlightTrack(flightId, color){
 
     const bounds = L.latLngBounds(pts);
     map.fitBounds(bounds, { padding: [60, 60] });
-    document.getElementById("clear-track-btn").style.display = "";
+    const reset = document.getElementById("history-reset-btn");
+    if (reset) reset.style.display = "";
   } catch(e) {
     console.warn("showFlightTrack failed:", e);
   }
@@ -1132,8 +1226,9 @@ async function showFlightTrack(flightId, color){
 
 function clearFlightTrack(){
   flightTrackLayer.clearLayers();
-  document.querySelectorAll("#flight-log-list .flight-row.active").forEach(r => r.classList.remove("active"));
-  document.getElementById("clear-track-btn").style.display = "none";
+  document.querySelectorAll("#history-list .flight-row.active").forEach(r => r.classList.remove("active"));
+  const reset = document.getElementById("history-reset-btn");
+  if (reset) reset.style.display = "none";
 }
 
 // Resolve a lat/lon to a human-friendly location name.
@@ -1152,38 +1247,61 @@ function resolveLocation(lat, lon, airportFromServer){
   return null;
 }
 
-function renderFlightLog(flights){
-  const list = document.getElementById("flight-log-list");
-  const count = document.getElementById("flight-count");
-  if (!list || !count) return;
-  count.textContent = flights.length;
-  if (flights.length === 0) {
-    list.innerHTML = `<li class="flight-empty">No flights logged yet</li>`;
+async function showHistory(reg){
+  const cfg = FLEET.find(c => c.registration === reg);
+  if (!cfg) return;
+  openPanel("history-panel");
+  const title = document.getElementById("history-title");
+  if (title) {
+    title.textContent = `📋 ${cfg.label} · HISTORY`;
+    title.style.color = cfg.color;
+  }
+  const list = document.getElementById("history-list");
+  if (list) list.innerHTML = `<li class="history-empty">Loading…</li>`;
+  const flights = await fetchFlightsForReg(reg);
+  renderHistory(reg, cfg, flights);
+}
+
+function renderHistory(reg, cfg, flights){
+  const list = document.getElementById("history-list");
+  if (!list) return;
+  if (!flights || flights.length === 0) {
+    list.innerHTML = `<li class="history-empty">No flights logged for ${cfg.label} yet</li>`;
     return;
   }
-  list.innerHTML = flights.map(f => {
-    const cfg = FLEET.find(c => c.registration === f.reg);
-    const color = cfg?.color || "#FFB800";
-    const label = cfg?.label || f.reg;
-    const takeoff = new Date(f.takeoff_time);
-    const dateStr = takeoff.toLocaleString("en-US", {month:"short", day:"numeric", hour:"2-digit", minute:"2-digit", hour12:false});
-    const airborne = f.landing_time == null;
-    const duration = airborne ? "AIRBORNE" : (f.duration_sec ? `${Math.floor(f.duration_sec/60)}m ${f.duration_sec%60}s` : "—");
-    const maxAlt = f.max_alt_ft ? `${Math.round(f.max_alt_ft).toLocaleString()}ft` : "—";
-    const maxSpd = f.max_speed_kt ? `${Math.round(f.max_speed_kt)}kt` : "—";
-    const dist = (f.distance_nm != null && f.distance_nm > 0) ? `${f.distance_nm.toFixed(1)}nm` : "—";
-    const fromLoc = resolveLocation(f.takeoff_lat, f.takeoff_lon, f.airport_takeoff);
-    const toLoc   = airborne ? null : resolveLocation(f.landing_lat, f.landing_lon, f.airport_landing);
-    const routeLine = (fromLoc || toLoc) || airborne
-      ? `<div class="flight-route">${fromLoc || "scene"} → ${airborne ? "…" : (toLoc || "scene")}</div>`
-      : "";
-    return `<li class="flight-row ${airborne?"airborne":""}" data-flight-id="${f.id}" data-color="${color}" style="--ac-color:${color}">
-      <div class="flight-top"><span class="flight-call">${label}</span><span class="flight-time">${dateStr} · ${duration}</span></div>
-      ${routeLine}
-      <div class="flight-stats"><span>ALT <b>${maxAlt}</b></span><span>SPD <b>${maxSpd}</b></span><span>DIST <b>${dist}</b></span></div>
-    </li>`;
-  }).join("");
-
+  // Group by local date — newest first since the API returns flights newest first.
+  const groups = new Map();
+  for (const f of flights) {
+    const d = new Date(f.takeoff_time);
+    const key = d.toLocaleDateString("en-US", { year:"numeric", month:"short", day:"numeric" });
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(f);
+  }
+  const color = cfg.color || "#FFB800";
+  const html = [];
+  for (const [date, group] of groups) {
+    html.push(`<li class="flight-date-header">${date}</li>`);
+    for (const f of group) {
+      const takeoff = new Date(f.takeoff_time);
+      const timeStr = takeoff.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:false });
+      const airborne = f.landing_time == null;
+      const duration = airborne ? "AIRBORNE" : (f.duration_sec ? `${Math.floor(f.duration_sec/60)}m ${f.duration_sec%60}s` : "—");
+      const maxAlt = f.max_alt_ft ? `${Math.round(f.max_alt_ft).toLocaleString()}ft` : "—";
+      const maxSpd = f.max_speed_kt ? `${Math.round(f.max_speed_kt)}kt` : "—";
+      const dist = (f.distance_nm != null && f.distance_nm > 0) ? `${f.distance_nm.toFixed(1)}nm` : "—";
+      const fromLoc = resolveLocation(f.takeoff_lat, f.takeoff_lon, f.airport_takeoff);
+      const toLoc   = airborne ? null : resolveLocation(f.landing_lat, f.landing_lon, f.airport_landing);
+      const routeLine = (fromLoc || toLoc) || airborne
+        ? `<div class="flight-route">${fromLoc || "scene"} → ${airborne ? "…" : (toLoc || "scene")}</div>`
+        : "";
+      html.push(`<li class="flight-row ${airborne?"airborne":""}" data-flight-id="${f.id}" data-color="${color}" style="--ac-color:${color}">
+        <div class="flight-top"><span class="flight-call">${timeStr}</span><span class="flight-time">${duration}</span></div>
+        ${routeLine}
+        <div class="flight-stats"><span>ALT <b>${maxAlt}</b></span><span>SPD <b>${maxSpd}</b></span><span>DIST <b>${dist}</b></span></div>
+      </li>`);
+    }
+  }
+  list.innerHTML = html.join("");
   list.querySelectorAll(".flight-row").forEach(row => {
     row.addEventListener("click", () => {
       list.querySelectorAll(".flight-row").forEach(r => r.classList.remove("active"));
@@ -1191,11 +1309,6 @@ function renderFlightLog(flights){
       showFlightTrack(row.dataset.flightId, row.dataset.color);
     });
   });
-}
-
-async function tickFlightLog(){
-  const flights = await fetchFlights();
-  renderFlightLog(flights);
 }
 
 /* ---------- Warm start: pre-populate fleet positions from worker D1 ----------
@@ -1318,12 +1431,21 @@ function initUI(){
     if(state.sim.enabled)tick();
   });
 
-  // ===== DEV TOOLS panel open/close =====
+  // ===== DEV TOOLS panel open/close (lives bottom-left now) =====
   const devOpen  = document.getElementById("dev-open-btn");
   const devPanel = document.getElementById("dev-panel");
   const devClose = document.getElementById("dev-close-btn");
   devOpen.addEventListener("click", () => { devPanel.classList.remove("hidden"); devOpen.style.display = "none"; });
   devClose.addEventListener("click", () => { devPanel.classList.add("hidden"); devOpen.style.display = ""; });
+
+  // ===== OPTIONS / TRAFFIC / HISTORY floating panels — mutex triggers + close buttons =====
+  document.getElementById("options-open-btn").addEventListener("click", () => togglePanel("options-panel"));
+  document.getElementById("traffic-open-btn").addEventListener("click", () => togglePanel("traffic-panel"));
+  document.querySelectorAll(".float-close-btn").forEach(btn => {
+    btn.addEventListener("click", () => closePanel(btn.dataset.target));
+  });
+  // CLEAR TRACK lives inside the history panel now
+  document.getElementById("history-reset-btn").addEventListener("click", clearFlightTrack);
 
   // ===== ICON TESTER =====
   // Applies a user-uploaded image + size/rotation/anchor tweaks to N732HM
@@ -1497,7 +1619,6 @@ function initUI(){
 
 window.addEventListener("DOMContentLoaded", () => {
   initUI();
-  document.getElementById("clear-track-btn").addEventListener("click", clearFlightTrack);
   // Paint the map IMMEDIATELY so the user sees rings + dim base markers even
   // before the first API call returns. Avoids the "blank dark map" gap that
   // made initial load feel broken when fleet aircraft are offline.
@@ -1508,8 +1629,8 @@ window.addEventListener("DOMContentLoaded", () => {
   warmStart();
   tick();
   setInterval(tick, SETTINGS.refreshIntervalMs);
-  tickFlightLog();
-  setInterval(tickFlightLog, 15000);
+  // Flight history is no longer polled globally — it's fetched on demand when
+  // the user clicks the 📋 button on a specific fleet card.
 });
 </script>
 </body>
