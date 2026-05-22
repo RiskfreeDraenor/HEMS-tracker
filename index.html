@@ -220,18 +220,32 @@ const SETTINGS = {
   .sim-row span { font-size: 13px; font-weight: 600; color: var(--c-fleet); letter-spacing: .05em; }
 
   /* ===== Floating panels (OPTIONS, TRAFFIC, HISTORY, DEV TOOLS) ===== */
-  /* Trigger buttons (DEV TOOLS now lives bottom-left; OPTIONS/TRAFFIC stack top-right) */
-  #dev-open-btn, #options-open-btn, #traffic-open-btn {
-    position: fixed; z-index: 1400;
+  /* OPTIONS + TRAFFIC live in the topbar now (no fixed positioning) */
+  #options-open-btn, #traffic-open-btn {
     background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
     font-family: var(--f-mono); font-size: 10px; letter-spacing: .2em; font-weight: 600;
-    padding: 7px 12px; cursor: pointer; transition: all .15s ease;
+    padding: 6px 12px; cursor: pointer; transition: all .15s ease;
+    display: inline-flex; align-items: center; gap: 6px; line-height: 1;
   }
-  #options-open-btn { top: 58px; right: 16px; }
-  #traffic-open-btn { top: 92px; right: 16px; }
-  #dev-open-btn    { bottom: 6px; left: 100px; padding: 4px 10px; font-size: 9px; }
-  #options-open-btn:hover, #dev-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+  #options-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
   #traffic-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-traffic); color: var(--c-traffic); }
+  #traffic-count-btn {
+    display: inline-block; background: var(--c-bg); border: 1px solid var(--c-border);
+    padding: 1px 5px; font-size: 10px; letter-spacing: 0; color: var(--c-traffic);
+  }
+
+  /* DEV TOOLS button stays fixed bottom-left next to the version label */
+  #dev-open-btn {
+    position: fixed; z-index: 1400; bottom: 6px; left: 100px;
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    font-family: var(--f-mono); font-size: 9px; letter-spacing: .2em; font-weight: 600;
+    padding: 4px 10px; cursor: pointer; transition: all .15s ease;
+  }
+  #dev-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+
+  /* Topbar layout — left group (brand + LIVE status), right group (trigger buttons) */
+  .topbar-left  { display: flex; align-items: center; gap: 18px; }
+  .topbar-right { display: flex; align-items: center; gap: 8px; }
 
   /* Floating panel containers (share styling; positions differ) */
   #dev-panel, #options-panel, #traffic-panel, #history-panel {
@@ -242,9 +256,9 @@ const SETTINGS = {
     display: flex; flex-direction: column;
   }
   #dev-panel    { bottom: 36px; left: 16px; }
-  #options-panel{ top: 130px; right: 16px; max-height: calc(100vh - 150px); }
-  #traffic-panel{ top: 130px; right: 16px; max-height: calc(100vh - 150px); }
-  #history-panel{ top: 130px; right: 16px; width: 400px; max-height: calc(100vh - 150px); }
+  #options-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); }
+  #traffic-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); }
+  #history-panel{ top: 56px; right: 16px; width: 400px; max-height: calc(100vh - 76px); }
   #dev-panel.hidden, #options-panel.hidden, #traffic-panel.hidden, #history-panel.hidden { display: none; }
 
   /* Shared bar / body / close-btn for all floating panels */
@@ -448,12 +462,18 @@ const SETTINGS = {
 <body>
   <div id="app">
     <header id="topbar">
-      <div class="brand">
-        <span class="mark">◉ HEMS TRACKER</span>
-        <span class="sub" id="fleet-summary">— FLEET</span>
+      <div class="topbar-left">
+        <div class="brand">
+          <span class="mark">◉ HEMS TRACKER</span>
+          <span class="sub" id="fleet-summary">— FLEET</span>
+        </div>
+        <div class="statusline">
+          <span><span id="status-dot" class="status-dot"></span> <span id="status-text">CONNECTING…</span></span>
+        </div>
       </div>
-      <div class="statusline">
-        <span><span id="status-dot" class="status-dot"></span> <span id="status-text">CONNECTING…</span></span>
+      <div class="topbar-right">
+        <button id="options-open-btn">⚙ OPTIONS</button>
+        <button id="traffic-open-btn">📡 TRAFFIC <span id="traffic-count-btn">0</span></button>
       </div>
     </header>
 
@@ -471,10 +491,6 @@ const SETTINGS = {
       </footer>
     </aside>
   </div>
-
-  <!-- Floating panel triggers — OPTIONS + TRAFFIC stacked top-right of map -->
-  <button id="options-open-btn">⚙ OPTIONS</button>
-  <button id="traffic-open-btn">📡 TRAFFIC <span id="traffic-count-btn">0</span></button>
 
   <!-- DEV TOOLS lives bottom-left next to the version label now -->
   <button id="dev-open-btn">🛠 DEV</button>
@@ -591,7 +607,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0040</div>
+  <div id="version">v.0041</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1089,7 +1105,7 @@ function renderPanel(primaryAc,trafficItems){
       const focusCls=state.focusedReg===cfg.registration?" focused":"";
       const imgCls = cfg.image ? " has-img" : "";
       const imgStyle = cfg.image ? `; --ac-bg: url('${cfg.image}')` : "";
-      const histBtn = `<button class="fc-history-btn" data-history-reg="${cfg.registration}" title="Flight history">📋 HIST</button>`;
+      const histBtn = `<button class="fc-history-btn" data-history-reg="${cfg.registration}" title="Flight history">📋 History</button>`;
       if(!ac)return `<div class="fleet-card offline${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div>${histBtn}</div>`;
       const onGnd=isOnGround(ac);
       return `<div class="fleet-card ${onGnd?"ground":"airborne"}${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div>${histBtn}</div>`;
