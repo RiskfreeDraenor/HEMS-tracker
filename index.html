@@ -706,7 +706,7 @@ const Api=(()=>{
     { name:"allorigins", url: p => `https://api.allorigins.win/raw?url=${encodeURIComponent(directBase + p)}` },
   ];
 
-  const FETCH_TIMEOUT_MS = 5000;   // give up on a strategy after 5s and fall through to the next
+  const FETCH_TIMEOUT_MS = 8000;   // give up on a strategy after 8s and fall through to the next
 
   async function _fetchJson(url){
     const ctrl = new AbortController();
@@ -738,10 +738,19 @@ const Api=(()=>{
 })();
 
 /* ---------- main app ---------- */
-const state={radiusNm:SETTINGS.defaultRadiusNm,maxAltFt:SETTINGS.defaultMaxAltFt,fleet:{},traffic:[],fleetHexes:new Set(),trails:new Map(),lastUpdate:null,lastError:null,selectedHex:null,paused:false,
+const state={radiusNm:SETTINGS.defaultRadiusNm,maxAltFt:SETTINGS.defaultMaxAltFt,fleet:{},traffic:[],fleetHexes:new Set(),trails:new Map(),lastUpdate:null,lastError:null,selectedHex:null,paused:false,consecutiveFails:0,
   sim:{enabled:false,primary:{lat:BASE_LOCATION.lat,lon:BASE_LOCATION.lon,alt:1500,heading:90,speed:100,autoFly:false},traffic:[]}};
 const primary=FLEET.find(a=>a.isPrimary)??FLEET[0];
 state.focusedReg=primary.registration;   // which aircraft drives rings / clock / altitude features; changed by clicking a card
+
+/* ---------- Smooth-tracking state ----------
+   fleetFix:     last confirmed ADS-B sample per fleet aircraft (post outlier filter).
+                 Drives dead-reckoning between polls.
+   fleetDisplay: current animated lat/lon — what the marker is actually rendered at,
+                 eased toward the dead-reckoned target each frame.
+   Both are keyed by UPPER-CASE registration so they match adsb.lol's ac.r casing. */
+const fleetFix     = new Map();
+const fleetDisplay = new Map();
 const SIM_PRIMARY_LABEL="123XX";
 const ORIG_PRIMARY_LABEL=FLEET[0].label;
 
@@ -777,6 +786,11 @@ function setSimMode(on){
   state.sim.enabled=on;
   FLEET[0].label=on?SIM_PRIMARY_LABEL:ORIG_PRIMARY_LABEL;
   state.trails.clear();
+  // Reset smooth-tracking for the primary so the first sim tick doesn't get
+  // rejected by the outlier filter (sim usually starts at BASE_LOCATION which
+  // is likely far from the last real fix).
+  fleetFix.delete(primary.registration.toUpperCase());
+  fleetDisplay.delete(primary.registration.toUpperCase());
   if(on && state.sim.traffic.length===0) regenerateSimTraffic();
   tick();
 }
@@ -796,13 +810,12 @@ function simTick(){
       category:"A7", t:"B429", squawk:"1200",
     }
   };
-  let pts=state.trails.get(primary.registration);
-  if(!pts){pts=[]; state.trails.set(primary.registration,pts);}
-  const last=pts[pts.length-1];
-  if(!last || last[0]!==p.lat || last[1]!==p.lon){
-    pts.push([p.lat,p.lon]);
-    while(pts.length>SETTINGS.trailMaxPoints) pts.shift();
-  }
+  // Feed the smooth-tracking system so the animation loop renders sim flight
+  // with the same dead-reckoning treatment. ingestFleetSample also handles
+  // the trail push, so no duplicate work here.
+  ingestFleetSample(primary.registration.toUpperCase(),
+                    state.fleet[primary.registration], Date.now(),
+                    { skipOutlier: true });
   state.traffic=state.sim.traffic.map(t=>({
     hex:t.hex, r:t.callsign, flight:t.callsign,
     lat:t.lat, lon:t.lon, alt_baro:t.alt, gs:t.speed, track:t.heading,
@@ -1118,13 +1131,20 @@ function render(){
 
   for(const item of allItems){
     const {ac,fleetCfg,isBase,layer}=item;
+    // Fleet aircraft markers ride on the smoothed display position so they
+    // don't jump on every new sample. Bases + traffic use raw lat/lon.
+    let mLat = ac.lat, mLon = ac.lon;
+    if (fleetCfg && !isBase) {
+      const disp = fleetDisplay.get(fleetCfg.registration.toUpperCase());
+      if (disp) { mLat = disp.lat; mLon = disp.lon; }
+    }
     const isNear=!isBase&&primaryAc&&ac.hex!==primaryAc.hex&&
       distanceNm(primaryAc.lat,primaryAc.lon,ac.lat,ac.lon)<=SETTINGS.proximityHorizontalNm&&
       (()=>{const pAlt=effectiveAltFt(primaryAc.alt_baro),tAlt=effectiveAltFt(ac.alt_baro);if(pAlt==null||tAlt==null)return true;return Math.abs(pAlt-tAlt)<=SETTINGS.proximityVerticalFt;})();
     const icon=buildIcon({ac,fleetCfg,isNear,primaryAc,isBase});
     let m=markerByHex.get(ac.hex);
-    if(m){m.setLatLng([ac.lat,ac.lon]);m.setIcon(icon);}
-    else{m=L.marker([ac.lat,ac.lon],{icon,riseOnHover:true}).addTo(layer);m.on("click",()=>{state.selectedHex=ac.hex;});markerByHex.set(ac.hex,m);}
+    if(m){m.setLatLng([mLat,mLon]);m.setIcon(icon);}
+    else{m=L.marker([mLat,mLon],{icon,riseOnHover:true}).addTo(layer);m.on("click",()=>{state.selectedHex=ac.hex;});markerByHex.set(ac.hex,m);}
     m.bindPopup(popupHtml(ac,fleetCfg,primaryAc,isBase,focusedCfg.label),{className:"ac-popup",closeButton:false,offset:[0,-8]});
     if(state.selectedHex===ac.hex&&!m.isPopupOpen())m.openPopup();
   }
@@ -1402,6 +1422,89 @@ function renderHistory(reg, cfg, flights){
    the cached rows, and render — so the map shows aircraft within ~100ms instead
    of waiting for the first adsb.lol round-trip. tick() will overwrite this
    data with fresh adsb.lol data a moment later. */
+
+/* ---------- Smooth tracking: outlier filter + dead-reckoning + animation loop ----------
+   The three pieces that turn a 3-second-cadence ADS-B feed into smooth-looking flight:
+   1. ingestFleetSample() — receives a new sample; rejects it if it implies impossible
+      movement vs the last confirmed fix. Pushes confirmed positions to the trail so
+      stale/jittery samples don't draw starburst artifacts.
+   2. projectFromFix() — given a confirmed fix and a "now" timestamp, dead-reckons
+      where the aircraft *should* be using its last known heading + ground speed.
+   3. animationFrame() — runs every frame, eases each fleet marker from its current
+      displayed position toward the dead-reckoned target. Net effect: marker glides
+      continuously between API samples instead of teleporting every 3 seconds. */
+function ingestFleetSample(reg, newAc, now, opts){
+  if (!newAc || !Number.isFinite(newAc.lat) || !Number.isFinite(newAc.lon)) return false;
+  const prev = fleetFix.get(reg);
+  if (prev && !(opts && opts.skipOutlier)) {
+    const dtSec = (now - prev.t) / 1000;
+    if (dtSec > 0.1) {
+      const observedNm = distanceNm(prev.lat, prev.lon, newAc.lat, newAc.lon);
+      // Generous headroom: cap at max(reported gs, 200kt floor) × 1.6 buffer.
+      // 0.25nm minimum slack absorbs ADS-B jitter on slow / hovering aircraft.
+      const capKt = Math.max(prev.gs || 0, newAc.gs || 0, 200) * 1.6;
+      const maxNm = Math.max((capKt * dtSec) / 3600, 0.25);
+      if (observedNm > maxNm) {
+        console.warn(`[outlier] ${reg}: ${observedNm.toFixed(2)}nm in ${dtSec.toFixed(1)}s — skipping`);
+        return false;
+      }
+    }
+  }
+  fleetFix.set(reg, {
+    lat: newAc.lat, lon: newAc.lon,
+    track: Number.isFinite(newAc.track) ? newAc.track : (prev ? prev.track : 0),
+    gs:    Number.isFinite(newAc.gs)    ? newAc.gs    : (prev ? prev.gs    : 0),
+    t: now,
+  });
+  if (!fleetDisplay.has(reg)) {
+    fleetDisplay.set(reg, { lat: newAc.lat, lon: newAc.lon });
+  }
+  // Push only confirmed positions to the trail (outliers never get drawn).
+  let pts = state.trails.get(reg);
+  if (!pts) { pts = []; state.trails.set(reg, pts); }
+  const last = pts[pts.length - 1];
+  if (!last || last[0] !== newAc.lat || last[1] !== newAc.lon) {
+    pts.push([newAc.lat, newAc.lon]);
+    while (pts.length > SETTINGS.trailMaxPoints) pts.shift();
+  }
+  return true;
+}
+
+function projectFromFix(fix, now){
+  // Cap extrapolation at 10s. Without this, a backgrounded tab whose rAF was
+  // throttled would wake up and project the marker minutes past the last fix,
+  // then snap back when a new sample lands. 10s is ~3 missed ticks — enough
+  // forward-prediction for normal use, not so much that it can stray.
+  const dtSec = Math.min((now - fix.t) / 1000, 10);
+  if (!Number.isFinite(fix.gs) || !Number.isFinite(fix.track) || fix.gs < 5) {
+    return [fix.lat, fix.lon];   // stationary / hovering → don't extrapolate noise
+  }
+  const distNm = (fix.gs * dtSec) / 3600;
+  return projectLatLon(fix.lat, fix.lon, fix.track, distNm);
+}
+
+function animationFrame(){
+  const now = Date.now();
+  for (const cfg of FLEET) {
+    const reg = cfg.registration.toUpperCase();
+    const fix = fleetFix.get(reg);
+    if (!fix) continue;
+    const display = fleetDisplay.get(reg);
+    if (!display) continue;
+    const [targetLat, targetLon] = projectFromFix(fix, now);
+    // Lerp toward target. 0.18 ≈ 200ms to converge — smooth without lag.
+    const k = 0.18;
+    display.lat += (targetLat - display.lat) * k;
+    display.lon += (targetLon - display.lon) * k;
+    const ac = state.fleet[cfg.registration];
+    if (ac && ac.hex) {
+      const m = markerByHex.get(ac.hex);
+      if (m) m.setLatLng([display.lat, display.lon]);
+    }
+  }
+  requestAnimationFrame(animationFrame);
+}
+
 async function warmStart(){
   if (!workerLogBase) return;
   try {
@@ -1428,6 +1531,9 @@ async function warmStart(){
         gs:       row.last_gs,
         track:    row.last_track,
       };
+      // Seed the smooth-tracking state too so the animation loop has something
+      // to lerp from when the first real tick lands.
+      ingestFleetSample(row.reg.toUpperCase(), state.fleet[row.reg], now, { skipOutlier: true });
       added++;
     }
     if (added > 0) {
@@ -1443,24 +1549,11 @@ async function tick(){
   if(state.paused)return;
   if(state.sim.enabled){simTick();render();return;}
   try{
-    const fleetResults=await Promise.all(FLEET.map(async cfg=>{
-      try{return [cfg.registration,await Api.byRegistration(cfg.registration)];}
-      catch(e){return [cfg.registration,null];}
-    }));
-    state.fleet=Object.fromEntries(fleetResults);
-    for(const cfg of FLEET){
-      const ac=state.fleet[cfg.registration];
-      if(!ac||!Number.isFinite(ac.lat)||!Number.isFinite(ac.lon))continue;
-      let pts=state.trails.get(cfg.registration);
-      if(!pts){pts=[];state.trails.set(cfg.registration,pts);}
-      const last=pts[pts.length-1];
-      if(!last||last[0]!==ac.lat||last[1]!==ac.lon){
-        pts.push([ac.lat,ac.lon]);
-        while(pts.length>SETTINGS.trailMaxPoints)pts.shift();
-      }
-    }
-    // Traffic query is centered on the FOCUSED aircraft (not the static "primary").
-    // This lets clicking any fleet card re-center the live traffic feed.
+    // ----- Single bbox query -----
+    // Replaces N+1 per-reg fetches with one call that returns every aircraft in
+    // a bbox covering both the user's traffic radius AND all fleet positions.
+    // Fewer requests = fewer abort timeouts; bbox feed tends to return fresher
+    // data than per-reg too.
     const focusedCfg = FLEET.find(c => c.registration === state.focusedReg) || primary;
     const focusedAc  = state.fleet[focusedCfg.registration];
     const focus = (focusedAc && Number.isFinite(focusedAc.lat) && Number.isFinite(focusedAc.lon))
@@ -1468,10 +1561,50 @@ async function tick(){
       : focusedCfg.base
         ? { lat: focusedCfg.base.lat, lon: focusedCfg.base.lon }
         : { lat: BASE_LOCATION.lat, lon: BASE_LOCATION.lon };
-    state.traffic = await Api.trafficNear(focus.lat, focus.lon, state.radiusNm);
-    state.lastUpdate=Date.now();
-    state.lastError=null;
-  }catch(e){state.lastError=e.message||String(e);}
+    // Expand the bbox so other fleet aircraft (parked at distant bases or flying
+    // far from the focus) still come back in the response.
+    let bboxRadius = state.radiusNm;
+    for (const cfg of FLEET) {
+      const fix = fleetFix.get(cfg.registration.toUpperCase());
+      const here = fix ? { lat: fix.lat, lon: fix.lon }
+                       : (cfg.base ? { lat: cfg.base.lat, lon: cfg.base.lon } : null);
+      if (here) {
+        bboxRadius = Math.max(bboxRadius, distanceNm(focus.lat, focus.lon, here.lat, here.lon) + 8);
+      }
+    }
+    const allAc = await Api.trafficNear(focus.lat, focus.lon, bboxRadius);
+
+    // Split response: fleet (by registration, case-insensitive) + everything else.
+    const fleetRegs = new Set(FLEET.map(c => c.registration.toUpperCase()));
+    const newFleet = {};
+    const traffic  = [];
+    for (const ac of allAc) {
+      const r = (ac.r || "").toUpperCase();
+      if (r && fleetRegs.has(r)) newFleet[r] = ac;
+      else traffic.push(ac);
+    }
+
+    // Run each new fleet sample through the outlier filter. ingestFleetSample
+    // updates fleetFix + fleetDisplay + the trail; bad samples are dropped on
+    // the floor so the trail stays clean.
+    const now = Date.now();
+    for (const cfg of FLEET) {
+      const reg = cfg.registration.toUpperCase();
+      const newAc = newFleet[reg];
+      if (newAc) ingestFleetSample(reg, newAc, now);
+    }
+
+    state.fleet   = newFleet;
+    state.traffic = traffic;
+    state.lastUpdate = now;
+    state.consecutiveFails = 0;
+    state.lastError = null;
+  }catch(e){
+    state.consecutiveFails = (state.consecutiveFails || 0) + 1;
+    // Only surface ERR after several in a row — single hiccups happen often and
+    // would just flash annoyingly otherwise.
+    if (state.consecutiveFails >= 3) state.lastError = e.message || String(e);
+  }
   render();
 }
 
@@ -1728,6 +1861,11 @@ window.addEventListener("DOMContentLoaded", () => {
   warmStart();
   tick();
   setInterval(tick, SETTINGS.refreshIntervalMs);
+  // Smooth-marker animation loop — runs every frame, dead-reckons each fleet
+  // marker forward from its last confirmed fix and eases the displayed
+  // position toward that target. Net effect: aircraft glide smoothly between
+  // ADS-B samples instead of teleporting every 3 seconds.
+  requestAnimationFrame(animationFrame);
   // Flight history is no longer polled globally — it's fetched on demand when
   // the user clicks the 📋 button on a specific fleet card.
 });
