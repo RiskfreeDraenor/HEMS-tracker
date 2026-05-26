@@ -299,8 +299,6 @@ const SETTINGS = {
   .ov-side-section.scroll::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
   .ov-side-section h4 { font-size: 10px; letter-spacing: .25em; color: var(--c-muted); margin: 0 0 10px; font-weight: 600; }
   .ov-fleet-list .fleet-card { cursor: pointer; }
-  /* Aircraft cards inside the history sidebar omit the per-card 📋 button — clicking the card itself is the action. */
-  .ov-fleet-list .fc-history-btn { display: none; }
 
   .ov-main {
     grid-area: ovmain; display: flex; flex-direction: column; min-height: 0;
@@ -361,15 +359,6 @@ const SETTINGS = {
   }
   #dev-close-btn:hover, .float-close-btn:hover { color: var(--c-warn); }
   .dev-body, .float-body { padding: 12px 14px; overflow-y: auto; flex: 1; }
-
-  /* Per-card HISTORY button — bottom-right corner of each fleet card */
-  .fc-history-btn {
-    position: absolute; bottom: 6px; right: 6px; z-index: 2;
-    background: rgba(10,14,26,0.55); border: 1px solid var(--c-border-2); color: var(--c-muted);
-    font-family: var(--f-mono); font-size: 9px; letter-spacing: .15em; font-weight: 600;
-    padding: 2px 6px; cursor: pointer; transition: all .15s ease;
-  }
-  .fc-history-btn:hover { background: var(--c-surface); border-color: var(--ac-color, var(--c-fleet)); color: var(--ac-color, var(--c-fleet)); }
 
   /* History panel — date dividers + reset row */
   .flight-date-header {
@@ -604,11 +593,6 @@ const SETTINGS = {
 
     /* Hide DEV button on phones — it's a desktop power-user tool */
     #dev-open-btn { display: none; }
-
-    /* Per-card history button: tighter padding so it doesn't crowd the card */
-    .fc-history-btn { padding: 2px 5px; font-size: 9px; bottom: 5px; right: 5px; }
-    /* Leave a bit of right-padding inside cards so the absolute button doesn't overlap text */
-    .fleet-card { padding-right: 16px; }
   }
   </style>
 </head>
@@ -792,7 +776,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0045</div>
+  <div id="version">v.0046</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1311,17 +1295,15 @@ function renderPanel(primaryAc,trafficItems){
       const focusCls=state.focusedReg===cfg.registration?" focused":"";
       const imgCls = cfg.image ? " has-img" : "";
       const imgStyle = cfg.image ? `; --ac-bg: url('${cfg.image}')` : "";
-      const histBtn = `<button class="fc-history-btn" data-history-reg="${cfg.registration}" title="Flight history">📋 History</button>`;
-      if(!ac)return `<div class="fleet-card offline${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div>${histBtn}</div>`;
+      if(!ac)return `<div class="fleet-card offline${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div></div>`;
       const onGnd=isOnGround(ac);
-      return `<div class="fleet-card ${onGnd?"ground":"airborne"}${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div>${histBtn}</div>`;
+      return `<div class="fleet-card ${onGnd?"ground":"airborne"}${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div></div>`;
     }).join("");
     sections.push(`<div class="company-group"><div class="company-header">${companyName}</div>${cards}</div>`);
   }
   document.getElementById("fleet-panel").innerHTML=sections.join("");
   document.querySelectorAll("#fleet-panel .fleet-card").forEach(card=>{
-    card.addEventListener("click",(e)=>{
-      if (e.target.closest(".fc-history-btn")) return;   // history button handled below
+    card.addEventListener("click",()=>{
       const reg=card.dataset.reg, cfg=FLEET.find(c=>c.registration===reg), ac=state.fleet[reg];
       state.focusedReg=reg;
       if(ac&&Number.isFinite(ac.lat)&&Number.isFinite(ac.lon))map.setView([ac.lat,ac.lon],Math.max(map.getZoom(),12),{animate:true});
@@ -1332,12 +1314,6 @@ function renderPanel(primaryAc,trafficItems){
       if (window.matchMedia && window.matchMedia("(max-width: 800px)").matches) {
         document.body.classList.remove("fleet-open");
       }
-    });
-  });
-  document.querySelectorAll("#fleet-panel .fc-history-btn").forEach(btn => {
-    btn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      showHistory(btn.dataset.historyReg);
     });
   });
 
