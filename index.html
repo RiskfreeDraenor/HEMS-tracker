@@ -260,16 +260,18 @@ const SETTINGS = {
   #traffic-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); }
   #dev-panel.hidden, #options-panel.hidden, #traffic-panel.hidden { display: none; }
 
-  /* ===== HISTORY overlay — full-viewport view with dedicated map + alt chart ===== */
+  /* ===== HISTORY overlay — full-viewport view with dedicated map + alt chart =====
+     3-column layout: flights list LEFT (full height) | stats+map+alt chart CENTER
+     | aircraft picker RIGHT (full height). */
   #history-overlay {
     position: fixed; inset: 0; z-index: 2000;
     background: var(--c-bg);
     display: grid;
     grid-template-rows: 48px 1fr;
-    grid-template-columns: 320px 1fr;
+    grid-template-columns: 300px 1fr 260px;
     grid-template-areas:
-      "ovbar  ovbar"
-      "ovside ovmain";
+      "ovbar     ovbar   ovbar"
+      "ovflights ovmain  ovfleet";
   }
   #history-overlay.hidden { display: none; }
   .ov-bar {
@@ -289,15 +291,35 @@ const SETTINGS = {
   }
   .ov-close-btn:hover { background: var(--c-surface-2); border-color: var(--c-warn); color: var(--c-warn); }
 
-  .ov-side {
-    grid-area: ovside; background: var(--c-bg-2); border-right: 1px solid var(--c-border);
+  /* LEFT column — flights list takes the entire vertical space */
+  .ov-flights {
+    grid-area: ovflights; background: var(--c-bg-2); border-right: 1px solid var(--c-border);
     display: flex; flex-direction: column; min-height: 0; overflow: hidden;
   }
-  .ov-side-section { padding: 14px 16px; }
-  .ov-side-section.scroll { flex: 1; overflow-y: auto; min-height: 0; padding-top: 8px; }
-  .ov-side-section.scroll::-webkit-scrollbar { width: 6px; }
-  .ov-side-section.scroll::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
-  .ov-side-section h4 { font-size: 10px; letter-spacing: .25em; color: var(--c-muted); margin: 0 0 10px; font-weight: 600; }
+  .ov-flights-head {
+    padding: 12px 16px 8px; font-size: 10px; letter-spacing: .25em; color: var(--c-muted);
+    font-weight: 600; border-bottom: 1px solid var(--c-border);
+  }
+  .ov-flights-scroll {
+    flex: 1; overflow-y: auto; min-height: 0; padding: 8px 16px 16px;
+  }
+  .ov-flights-scroll::-webkit-scrollbar { width: 6px; }
+  .ov-flights-scroll::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
+
+  /* RIGHT column — compact aircraft picker, full vertical space */
+  .ov-fleet {
+    grid-area: ovfleet; background: var(--c-bg-2); border-left: 1px solid var(--c-border);
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .ov-fleet-head {
+    padding: 12px 16px 8px; font-size: 10px; letter-spacing: .25em; color: var(--c-muted);
+    font-weight: 600; border-bottom: 1px solid var(--c-border);
+  }
+  .ov-fleet-scroll {
+    flex: 1; overflow-y: auto; min-height: 0; padding: 10px 14px 16px;
+  }
+  .ov-fleet-scroll::-webkit-scrollbar { width: 6px; }
+  .ov-fleet-scroll::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
   .ov-fleet-list .fleet-card { cursor: pointer; }
 
   .ov-main {
@@ -399,14 +421,15 @@ const SETTINGS = {
     #dev-panel, #options-panel, #traffic-panel {
       width: calc(100vw - 32px); right: 16px; left: 16px;
     }
-    /* HISTORY overlay stacks vertically on phones: sidebar collapses to a fixed-height
-       top region, main content (map + alt chart) takes the rest. */
+    /* HISTORY overlay stacks vertically on phones: bar → fleet picker (compact)
+       → flights list → main (map + chart). */
     #history-overlay {
       grid-template-columns: 1fr;
-      grid-template-rows: 48px 40vh 1fr;
-      grid-template-areas: "ovbar" "ovside" "ovmain";
+      grid-template-rows: 48px auto 32vh 1fr;
+      grid-template-areas: "ovbar" "ovfleet" "ovflights" "ovmain";
     }
-    .ov-side { border-right: none; border-bottom: 1px solid var(--c-border); }
+    .ov-flights { border-right: none; border-bottom: 1px solid var(--c-border); }
+    .ov-fleet   { border-left: none;  border-bottom: 1px solid var(--c-border); max-height: 28vh; }
   }
   .btn-row { display: flex; gap: 6px; margin-top: 10px; }
   .btn { flex: 1; background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text); font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; padding: 7px 8px; cursor: pointer; transition: all .15s ease; }
@@ -697,17 +720,15 @@ const SETTINGS = {
       <button class="ov-close-btn" id="ov-close-btn" title="Close">✕ CLOSE</button>
     </header>
 
-    <aside class="ov-side">
-      <section class="ov-side-section">
-        <h4>FLEET</h4>
-        <div id="ov-fleet-list" class="ov-fleet-list"></div>
-      </section>
-      <section class="ov-side-section scroll">
-        <h4 id="ov-flights-head">FLIGHTS</h4>
+    <!-- LEFT column — flight history (takes full vertical space) -->
+    <aside class="ov-flights">
+      <div class="ov-flights-head" id="ov-flights-head">FLIGHTS</div>
+      <div class="ov-flights-scroll">
         <ul id="ov-flight-list" class="flight-log"></ul>
-      </section>
+      </div>
     </aside>
 
+    <!-- CENTER column — stats + dedicated map + altitude chart -->
     <main class="ov-main">
       <div class="ov-stats" id="ov-stats">
         <div class="ov-stats-empty">SELECT A FLIGHT</div>
@@ -723,6 +744,14 @@ const SETTINGS = {
         </div>
       </div>
     </main>
+
+    <!-- RIGHT column — aircraft picker -->
+    <aside class="ov-fleet">
+      <div class="ov-fleet-head">FLEET</div>
+      <div class="ov-fleet-scroll">
+        <div id="ov-fleet-list" class="ov-fleet-list"></div>
+      </div>
+    </aside>
   </div>
 
   <!-- Floating DEV TOOLS panel — hidden by default, opens via the button above -->
@@ -776,7 +805,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0046</div>
+  <div id="version">v.0047</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
