@@ -540,9 +540,9 @@ const SETTINGS = {
   /* Fleet panel now expands to fill the right column — scrolling lives on .panel-section.fleet-section */
   #fleet-panel { flex: 1; }
 
-  .flight-log { list-style: none; margin: 0; padding: 0; max-height: 200px; overflow-y: auto; }
-  .flight-log::-webkit-scrollbar { width: 6px; }
-  .flight-log::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
+  /* Scrolling is owned by the parent container now (.ov-flights-scroll) — the
+     list itself just renders rows and grows naturally to fit the content. */
+  .flight-log { list-style: none; margin: 0; padding: 0; }
   .flight-row { padding: 8px 10px; border-left: 3px solid var(--ac-color, var(--c-fleet)); border-bottom: 1px solid var(--c-border); cursor: pointer; transition: background .12s ease; }
   .flight-row:last-child { border-bottom: none; }
   .flight-row:hover { background: var(--c-surface); }
@@ -805,7 +805,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0047</div>
+  <div id="version">v.0048</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
