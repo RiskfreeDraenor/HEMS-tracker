@@ -559,39 +559,68 @@ const SETTINGS = {
   .btn-clear-track { background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text); font-family: var(--f-mono); font-size: 9px; letter-spacing: .12em; padding: 2px 6px; cursor: pointer; }
   .btn-clear-track:hover { background: var(--c-surface-2); }
 
-  /* Fleet drawer handle — hidden on desktop, visible on mobile (see media query below) */
-  .fleet-handle { display: none; }
+  /* ===== Mobile side drawer (slide-in from left) + hamburger trigger ===== */
+  /* Hamburger button — hidden on desktop, shown via the mobile media query below. */
+  #mobile-menu-btn {
+    display: none;
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    font-family: var(--f-mono); font-size: 16px; line-height: 1;
+    padding: 4px 10px; cursor: pointer; transition: all .15s ease;
+    align-items: center; justify-content: center;
+  }
+  #mobile-menu-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+
+  /* Action buttons inside the drawer (mobile only — desktop uses the topbar buttons) */
+  .drawer-actions { display: none; }
+  .drawer-actions button {
+    display: flex; align-items: center; gap: 12px;
+    padding: 12px 14px; width: 100%; text-align: left;
+    font-family: var(--f-mono); font-size: 12px; font-weight: 600; letter-spacing: .15em;
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    cursor: pointer; transition: all .15s ease;
+  }
+  .drawer-actions button:hover,
+  .drawer-actions button:focus { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); outline: none; }
+  .drawer-actions button#drawer-traffic-btn:hover { border-color: var(--c-traffic); color: var(--c-traffic); }
+  .drawer-actions button .icon { font-size: 16px; line-height: 1; }
+  .drawer-actions button .count {
+    margin-left: auto; background: var(--c-bg); border: 1px solid var(--c-border);
+    padding: 1px 6px; font-size: 10px; color: var(--c-traffic); letter-spacing: 0;
+  }
+
+  /* Dim backdrop behind the open drawer */
+  #mobile-backdrop {
+    position: fixed; top: 48px; left: 0; right: 0; bottom: 0;
+    background: rgba(0, 0, 0, 0.55);
+    z-index: 1400;
+    opacity: 0; pointer-events: none;
+    transition: opacity 0.22s ease;
+  }
+  body.drawer-open #mobile-backdrop { opacity: 1; pointer-events: auto; }
 
   @media (max-width: 800px) {
-    /* Map takes the full area below the topbar — panel becomes a bottom drawer (curtain) */
+    /* Map fills the whole area below the topbar — the right panel becomes a left-side drawer */
     #app { grid-template-columns: 1fr; grid-template-rows: 48px 1fr; grid-template-areas: "topbar" "map"; }
     #panel {
-      position: fixed; left: 0; right: 0; bottom: 0;
-      height: clamp(320px, 60vh, 540px);
-      border-left: none; border-top: 1px solid var(--c-border);
-      transform: translateY(calc(100% - 40px));   /* closed by default: only the 40px handle peeks above the bottom edge */
-      transition: transform 0.28s ease-out;
-      z-index: 900;
-      box-shadow: 0 -4px 20px rgba(0,0,0,0.6);
+      position: fixed; top: 48px; left: 0; bottom: 0;
+      width: min(86vw, 320px);
+      border-left: none; border-top: none;
+      border-right: 1px solid var(--c-border);
+      transform: translateX(-100%);
+      transition: transform 0.25s ease-out;
+      z-index: 1500;
+      box-shadow: 4px 0 24px rgba(0, 0, 0, 0.6);
     }
-    body.fleet-open #panel { transform: translateY(0); }
+    body.drawer-open #panel { transform: translateX(0); }
 
-    /* The handle bar that the user taps to open/close the drawer */
-    .fleet-handle {
-      display: flex; align-items: center; justify-content: space-between;
-      height: 40px; padding: 0 16px; flex: 0 0 40px;
-      cursor: pointer; user-select: none;
-      background: linear-gradient(180deg, var(--c-bg), var(--c-bg-2));
-      border-bottom: 1px solid var(--c-border);
-      font-family: var(--f-mono); font-size: 11px; letter-spacing: .25em;
-      color: var(--c-fleet); font-weight: 600;
-    }
-    .fleet-handle .fh-chevron { transition: transform 0.25s ease; font-size: 10px; color: var(--c-muted); }
-    body.fleet-open .fleet-handle .fh-chevron { transform: rotate(180deg); color: var(--c-fleet); }
-    #fleet-handle-count {
-      display: inline-block; margin-left: 4px; padding: 1px 6px;
-      background: var(--c-surface); border: 1px solid var(--c-border-2);
-      color: var(--c-text); font-size: 10px; letter-spacing: 0;
+    /* Show the hamburger trigger; hide the topbar action buttons (they live in the drawer now) */
+    #mobile-menu-btn { display: inline-flex; }
+    .topbar-right { display: none; }
+
+    /* Drawer actions become visible */
+    .drawer-actions {
+      display: flex; flex-direction: column; gap: 8px;
+      padding: 14px 16px; border-bottom: 1px solid var(--c-border);
     }
   }
 
@@ -623,6 +652,7 @@ const SETTINGS = {
   <div id="app">
     <header id="topbar">
       <div class="topbar-left">
+        <button id="mobile-menu-btn" aria-label="Open menu" title="Menu">☰</button>
         <div class="brand">
           <span class="mark">◉ HEMS TRACKER</span>
           <span class="sub" id="fleet-summary">— FLEET</span>
@@ -634,17 +664,19 @@ const SETTINGS = {
       <div class="topbar-right">
         <button id="options-open-btn"><span class="btn-icon">⚙</span><span class="btn-text">OPTIONS</span></button>
         <button id="history-open-btn"><span class="btn-icon">📋</span><span class="btn-text">HISTORY</span></button>
-        <button id="traffic-open-btn"><span class="btn-icon">📡</span><span class="btn-text">TRAFFIC</span><span id="traffic-count-btn">0</span></button>
+        <button id="traffic-open-btn"><span class="btn-icon">📡</span><span class="btn-text">TRAFFIC</span><span class="traffic-count" id="traffic-count-btn">0</span></button>
       </div>
     </header>
 
     <main id="map"></main>
 
     <aside id="panel">
-      <!-- Drawer handle — only visible on mobile, tap to slide the panel up/down -->
-      <div class="fleet-handle" id="fleet-handle">
-        <span>◣ FLEET <span id="fleet-handle-count">0</span></span>
-        <span class="fh-chevron">▲</span>
+      <!-- Action buttons — only visible on mobile (the drawer-actions class is hidden on desktop).
+           Desktop users get these from the topbar instead. -->
+      <div class="drawer-actions">
+        <button id="drawer-options-btn"><span class="icon">⚙</span><span>OPTIONS</span></button>
+        <button id="drawer-history-btn"><span class="icon">📋</span><span>HISTORY</span></button>
+        <button id="drawer-traffic-btn"><span class="icon">📡</span><span>TRAFFIC</span><span class="count traffic-count" id="drawer-traffic-count">0</span></button>
       </div>
 
       <section class="panel-section fleet-section">
@@ -658,6 +690,9 @@ const SETTINGS = {
       </footer>
     </aside>
   </div>
+
+  <!-- Dim backdrop behind the mobile side drawer — tap to close. Only visible when body.drawer-open is set. -->
+  <div id="mobile-backdrop"></div>
 
   <!-- DEV TOOLS lives bottom-left next to the version label now -->
   <button id="dev-open-btn">🛠 DEV</button>
@@ -701,7 +736,7 @@ const SETTINGS = {
   <!-- TRAFFIC floating panel — nearby aircraft around the focused fleet aircraft -->
   <div id="traffic-panel" class="hidden">
     <div class="float-bar">
-      <span class="float-title traffic">📡 TRAFFIC <span class="count" id="traffic-count">0</span></span>
+      <span class="float-title traffic">📡 TRAFFIC <span class="count traffic-count" id="traffic-count">0</span></span>
       <button class="float-close-btn" data-target="traffic-panel" title="Close">×</button>
     </div>
     <div class="float-body" style="padding: 0;">
@@ -805,7 +840,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0048</div>
+  <div id="version">v.0049</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1339,9 +1374,9 @@ function renderPanel(primaryAc,trafficItems){
       else if(cfg&&cfg.base)map.setView([cfg.base.lat,cfg.base.lon],Math.max(map.getZoom(),12),{animate:true});
       render();
       tick();    // re-fetch traffic around the newly-focused aircraft
-      // On mobile, auto-close the drawer so the user can see the aircraft on the map.
+      // On mobile, auto-close the side drawer so the user can see the aircraft on the map.
       if (window.matchMedia && window.matchMedia("(max-width: 800px)").matches) {
-        document.body.classList.remove("fleet-open");
+        document.body.classList.remove("drawer-open");
       }
     });
   });
@@ -1359,10 +1394,8 @@ function renderPanel(primaryAc,trafficItems){
     return `<li class="traf-row ${isNear?"near":""}" data-hex="${ac.hex}"><div class="tr-main"><span class="tr-call">${call}</span><span class="tr-type">${ac.t||""}</span></div><div class="tr-sub"><span>${fmtAltitude(ac.alt_baro)}</span><span>${fmtSpeed(ac.gs)}</span><span>${fmtDistance(d)} ${compassOctant(b)}</span></div></li>`;
   }).join("");
 
-  const _tcEl  = document.getElementById("traffic-count");
-  const _tcBtn = document.getElementById("traffic-count-btn");
-  if (_tcEl)  _tcEl.textContent  = list.length;
-  if (_tcBtn) _tcBtn.textContent = list.length;
+  // Update every traffic-count badge in the UI (panel header, topbar button, drawer button)
+  document.querySelectorAll(".traffic-count").forEach(el => { el.textContent = list.length; });
   document.getElementById("traffic-list").innerHTML=rows||`<li class="traf-empty">No traffic in radius</li>`;
 
   document.querySelectorAll(".traf-row").forEach(row=>{
@@ -2012,19 +2045,29 @@ function initUI(){
     }
   });
 
-  // ===== Mobile fleet drawer — handle bar toggles the panel up/down =====
-  // Handle exists in the DOM on all sizes but is CSS-hidden on desktop, so this
-  // click handler is a no-op there. On mobile the drawer defaults to CLOSED
-  // (only the handle peeks above the bottom edge) — the map is the primary
-  // view; the user pulls the drawer up to pick an aircraft.
-  const fleetHandle = document.getElementById("fleet-handle");
-  if (fleetHandle) {
-    fleetHandle.addEventListener("click", () => {
-      document.body.classList.toggle("fleet-open");
-    });
-  }
-  const fhc = document.getElementById("fleet-handle-count");
-  if (fhc) fhc.textContent = FLEET.length;
+  // ===== Mobile side drawer — hamburger toggles, backdrop closes =====
+  // On mobile the right panel is repositioned as a left-edge drawer that's hidden
+  // by default. body.drawer-open slides it in. Desktop ignores all of this since
+  // the hamburger button is display:none above the breakpoint.
+  const menuBtn   = document.getElementById("mobile-menu-btn");
+  const backdrop  = document.getElementById("mobile-backdrop");
+  const openDrawer  = () => document.body.classList.add("drawer-open");
+  const closeDrawer = () => document.body.classList.remove("drawer-open");
+  const toggleDrawer = () => document.body.classList.toggle("drawer-open");
+  if (menuBtn)  menuBtn.addEventListener("click", toggleDrawer);
+  if (backdrop) backdrop.addEventListener("click", closeDrawer);
+
+  // Drawer action buttons mirror the topbar's OPTIONS / TRAFFIC / HISTORY —
+  // they close the drawer first so the user sees the panel/overlay that opens.
+  document.getElementById("drawer-options-btn").addEventListener("click", () => {
+    closeDrawer(); togglePanel("options-panel");
+  });
+  document.getElementById("drawer-traffic-btn").addEventListener("click", () => {
+    closeDrawer(); togglePanel("traffic-panel");
+  });
+  document.getElementById("drawer-history-btn").addEventListener("click", () => {
+    closeDrawer(); openHistoryOverlay();
+  });
 
   // ===== ICON TESTER =====
   // Applies a user-uploaded image + size/rotation/anchor tweaks to N732HM
