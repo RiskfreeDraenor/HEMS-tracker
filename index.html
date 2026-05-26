@@ -248,7 +248,7 @@ const SETTINGS = {
   .topbar-right { display: flex; align-items: center; gap: 8px; }
 
   /* Floating panel containers (share styling; positions differ) */
-  #dev-panel, #options-panel, #traffic-panel, #history-panel {
+  #dev-panel, #options-panel, #traffic-panel {
     position: fixed; z-index: 1500;
     width: 360px; max-height: calc(100vh - 80px);
     background: var(--c-bg-2); border: 1px solid var(--c-border-2);
@@ -258,8 +258,94 @@ const SETTINGS = {
   #dev-panel    { bottom: 36px; left: 16px; }
   #options-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); }
   #traffic-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); }
-  #history-panel{ top: 56px; right: 16px; width: 400px; max-height: calc(100vh - 76px); }
-  #dev-panel.hidden, #options-panel.hidden, #traffic-panel.hidden, #history-panel.hidden { display: none; }
+  #dev-panel.hidden, #options-panel.hidden, #traffic-panel.hidden { display: none; }
+
+  /* ===== HISTORY overlay — full-viewport view with dedicated map + alt chart ===== */
+  #history-overlay {
+    position: fixed; inset: 0; z-index: 2000;
+    background: var(--c-bg);
+    display: grid;
+    grid-template-rows: 48px 1fr;
+    grid-template-columns: 320px 1fr;
+    grid-template-areas:
+      "ovbar  ovbar"
+      "ovside ovmain";
+  }
+  #history-overlay.hidden { display: none; }
+  .ov-bar {
+    grid-area: ovbar;
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 0 18px; background: linear-gradient(180deg, var(--c-bg-2), var(--c-bg));
+    border-bottom: 1px solid var(--c-border);
+  }
+  .ov-bar::after { content: ""; position: absolute; left: 0; right: 0; top: 47px; height: 1px;
+                   background: linear-gradient(90deg, transparent 0%, var(--c-fleet) 12%, var(--c-traffic) 55%, transparent 100%); opacity: .35; }
+  .ov-bar .ov-title { font-size: 12px; font-weight: 600; letter-spacing: .2em; color: var(--c-text); }
+  .ov-bar .ov-title .mark { color: var(--c-fleet); margin-right: 6px; }
+  .ov-bar .ov-sub { color: var(--c-muted); font-weight: 400; letter-spacing: .15em; font-size: 11px; margin-left: 10px; }
+  .ov-close-btn {
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    font-family: var(--f-mono); font-size: 12px; letter-spacing: .15em; padding: 6px 12px; cursor: pointer;
+  }
+  .ov-close-btn:hover { background: var(--c-surface-2); border-color: var(--c-warn); color: var(--c-warn); }
+
+  .ov-side {
+    grid-area: ovside; background: var(--c-bg-2); border-right: 1px solid var(--c-border);
+    display: flex; flex-direction: column; min-height: 0; overflow: hidden;
+  }
+  .ov-side-section { padding: 14px 16px; }
+  .ov-side-section.scroll { flex: 1; overflow-y: auto; min-height: 0; padding-top: 8px; }
+  .ov-side-section.scroll::-webkit-scrollbar { width: 6px; }
+  .ov-side-section.scroll::-webkit-scrollbar-thumb { background: var(--c-border-2); border-radius: 3px; }
+  .ov-side-section h4 { font-size: 10px; letter-spacing: .25em; color: var(--c-muted); margin: 0 0 10px; font-weight: 600; }
+  .ov-fleet-list .fleet-card { cursor: pointer; }
+  /* Aircraft cards inside the history sidebar omit the per-card 📋 button — clicking the card itself is the action. */
+  .ov-fleet-list .fc-history-btn { display: none; }
+
+  .ov-main {
+    grid-area: ovmain; display: flex; flex-direction: column; min-height: 0;
+  }
+  .ov-stats {
+    display: flex; gap: 0; padding: 12px 18px;
+    border-bottom: 1px solid var(--c-border); background: var(--c-bg-2);
+    align-items: center; flex-wrap: wrap; gap: 18px;
+  }
+  .ov-stat { display: flex; flex-direction: column; gap: 2px; min-width: 60px; }
+  .ov-stat .lbl { font-size: 9px; letter-spacing: .25em; color: var(--c-muted); }
+  .ov-stat .val { font-size: 14px; font-weight: 600; color: var(--c-text); letter-spacing: .04em; }
+  .ov-stat .val.accent { color: var(--ac-color, var(--c-fleet)); }
+  .ov-stats .ov-route { flex: 1; min-width: 200px; font-size: 12px; color: var(--c-text); letter-spacing: .04em; }
+  .ov-stats .ov-route .arrow { color: var(--c-muted); margin: 0 6px; }
+  .ov-stats-empty { color: var(--c-dim); font-size: 11px; letter-spacing: .2em; padding: 4px; }
+
+  #history-map { flex: 1; min-height: 0; background: var(--c-bg); }
+  #history-map.leaflet-container { background: var(--c-bg) !important; }
+
+  .ov-alt {
+    height: 140px; padding: 8px 12px; border-top: 1px solid var(--c-border);
+    background: var(--c-bg-2); display: flex; flex-direction: column;
+  }
+  .ov-alt-head {
+    display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 4px;
+  }
+  .ov-alt-head h5 { font-size: 9px; letter-spacing: .25em; color: var(--c-muted); margin: 0; font-weight: 600; }
+  .ov-alt-head .range { font-size: 10px; color: var(--c-text); letter-spacing: .04em; }
+  .ov-alt-svg-wrap { flex: 1; min-height: 0; position: relative; }
+  .alt-svg { width: 100%; height: 100%; display: block; }
+  .alt-svg path.alt-line { fill: none; stroke-width: 1.8; }
+  .alt-svg path.alt-fill { opacity: 0.18; stroke: none; }
+  .alt-svg .alt-label { fill: var(--c-muted); font-family: var(--f-mono); font-size: 9px; }
+  .alt-svg .alt-axis { stroke: var(--c-border); stroke-width: 1; }
+  .alt-empty { color: var(--c-dim); font-size: 11px; letter-spacing: .2em; text-align: center; padding-top: 50px; }
+
+  /* HISTORY trigger button in the topbar — same shape as OPTIONS/TRAFFIC */
+  #history-open-btn {
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: .2em; font-weight: 600;
+    padding: 6px 12px; cursor: pointer; transition: all .15s ease;
+    display: inline-flex; align-items: center; gap: 6px; line-height: 1;
+  }
+  #history-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
 
   /* Shared bar / body / close-btn for all floating panels */
   .dev-bar, .float-bar {
@@ -321,9 +407,17 @@ const SETTINGS = {
     white-space: pre-wrap; line-height: 1.5; user-select: all;
   }
   @media (max-width: 800px) {
-    #dev-panel, #options-panel, #traffic-panel, #history-panel {
+    #dev-panel, #options-panel, #traffic-panel {
       width: calc(100vw - 32px); right: 16px; left: 16px;
     }
+    /* HISTORY overlay stacks vertically on phones: sidebar collapses to a fixed-height
+       top region, main content (map + alt chart) takes the rest. */
+    #history-overlay {
+      grid-template-columns: 1fr;
+      grid-template-rows: 48px 40vh 1fr;
+      grid-template-areas: "ovbar" "ovside" "ovmain";
+    }
+    .ov-side { border-right: none; border-bottom: 1px solid var(--c-border); }
   }
   .btn-row { display: flex; gap: 6px; margin-top: 10px; }
   .btn { flex: 1; background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text); font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; padding: 7px 8px; cursor: pointer; transition: all .15s ease; }
@@ -532,6 +626,7 @@ const SETTINGS = {
       </div>
       <div class="topbar-right">
         <button id="options-open-btn"><span class="btn-icon">⚙</span><span class="btn-text">OPTIONS</span></button>
+        <button id="history-open-btn"><span class="btn-icon">📋</span><span class="btn-text">HISTORY</span></button>
         <button id="traffic-open-btn"><span class="btn-icon">📡</span><span class="btn-text">TRAFFIC</span><span id="traffic-count-btn">0</span></button>
       </div>
     </header>
@@ -607,18 +702,43 @@ const SETTINGS = {
     </div>
   </div>
 
-  <!-- HISTORY floating panel — opened from each fleet card's 📋 button -->
-  <div id="history-panel" class="hidden">
-    <div class="float-bar">
-      <span class="float-title" id="history-title">📋 HISTORY</span>
-      <button class="float-close-btn" data-target="history-panel" title="Close">×</button>
-    </div>
-    <div class="float-body" style="padding: 0 14px;">
-      <ul id="history-list" class="flight-log"></ul>
-    </div>
-    <div class="history-reset-row">
-      <button class="btn" id="history-reset-btn" style="display:none;">⊘ CLEAR TRACK</button>
-    </div>
+  <!-- HISTORY full-viewport overlay — opened from the topbar HISTORY button or any
+       fleet card's 📋 shortcut. Dedicated map + altitude chart, separate from main map. -->
+  <div id="history-overlay" class="hidden">
+    <header class="ov-bar">
+      <div>
+        <span class="ov-title"><span class="mark">📋</span>FLIGHT HISTORY</span>
+        <span class="ov-sub" id="ov-subtitle">— select an aircraft</span>
+      </div>
+      <button class="ov-close-btn" id="ov-close-btn" title="Close">✕ CLOSE</button>
+    </header>
+
+    <aside class="ov-side">
+      <section class="ov-side-section">
+        <h4>FLEET</h4>
+        <div id="ov-fleet-list" class="ov-fleet-list"></div>
+      </section>
+      <section class="ov-side-section scroll">
+        <h4 id="ov-flights-head">FLIGHTS</h4>
+        <ul id="ov-flight-list" class="flight-log"></ul>
+      </section>
+    </aside>
+
+    <main class="ov-main">
+      <div class="ov-stats" id="ov-stats">
+        <div class="ov-stats-empty">SELECT A FLIGHT</div>
+      </div>
+      <div id="history-map"></div>
+      <div class="ov-alt">
+        <div class="ov-alt-head">
+          <h5>ALTITUDE PROFILE</h5>
+          <span class="range" id="ov-alt-range"></span>
+        </div>
+        <div class="ov-alt-svg-wrap" id="ov-alt-chart">
+          <div class="alt-empty">select a flight to see altitude profile</div>
+        </div>
+      </div>
+    </main>
   </div>
 
   <!-- Floating DEV TOOLS panel — hidden by default, opens via the button above -->
@@ -672,7 +792,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0044</div>
+  <div id="version">v.0045</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -835,7 +955,8 @@ const trafficLayer=L.layerGroup().addTo(map);
 const fleetLayer=L.layerGroup().addTo(map);
 const ringsLayer=L.layerGroup().addTo(map);
 const trailsLayer=L.layerGroup().addTo(map);
-const flightTrackLayer=L.layerGroup().addTo(map);
+// flightTrackLayer was here — gone now. Flight tracks render on the HISTORY
+// overlay's dedicated Leaflet map, not on the main map.
 const airportsLayer=L.layerGroup();   // not added to map yet — toggled via the "SHOW AIRPORTS" button
 const markerByHex=new Map();
 
@@ -1273,8 +1394,9 @@ function renderPanel(primaryAc,trafficItems){
   if (fs) fs.textContent = `${airborne}/${totalFleet} AIRBORNE · ${totalFleet} FLEET`;
 }
 
-/* ---------- Floating-panel mutex (OPTIONS / TRAFFIC / HISTORY share one screen slot) ---------- */
-const TOP_RIGHT_PANELS = ["options-panel", "traffic-panel", "history-panel"];
+/* ---------- Floating-panel mutex (OPTIONS / TRAFFIC share one screen slot) ----------
+   HISTORY is no longer in this group — it's a full-viewport overlay (see below). */
+const TOP_RIGHT_PANELS = ["options-panel", "traffic-panel"];
 function openPanel(id){
   for (const pid of TOP_RIGHT_PANELS) {
     const p = document.getElementById(pid);
@@ -1291,7 +1413,7 @@ function togglePanel(id){
   if (p.classList.contains("hidden")) openPanel(id); else closePanel(id);
 }
 
-/* ---------- Per-aircraft flight history (opened from each fleet card's 📋 button) ---------- */
+/* ---------- Worker fetch helpers ---------- */
 async function fetchFlightsForReg(reg){
   if (!workerLogBase) return [];
   try {
@@ -1305,35 +1427,17 @@ async function fetchFlightsForReg(reg){
   }
 }
 
-async function showFlightTrack(flightId, color){
-  if (!workerLogBase) return;
+async function fetchTrackPoints(flightId){
+  if (!workerLogBase) return [];
   try {
     const res = await fetch(`${workerLogBase}/flight/${encodeURIComponent(flightId)}/track`);
-    if (!res.ok) return;
+    if (!res.ok) return [];
     const data = await res.json();
-    const pts = (data.points || []).map(p => [p.lat, p.lon]).filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
-
-    flightTrackLayer.clearLayers();
-    if (pts.length < 2) return;
-
-    L.polyline(pts, { color: color || "#FFB800", weight: 3, opacity: 0.95 }).addTo(flightTrackLayer);
-    L.circleMarker(pts[0], { radius: 6, color: color, fillColor: "#0a0e1a", fillOpacity: 1, weight: 2 }).addTo(flightTrackLayer).bindPopup("Takeoff");
-    L.circleMarker(pts[pts.length-1], { radius: 6, color: color, fillColor: color, fillOpacity: 1, weight: 2 }).addTo(flightTrackLayer).bindPopup("Landing");
-
-    const bounds = L.latLngBounds(pts);
-    map.fitBounds(bounds, { padding: [60, 60] });
-    const reset = document.getElementById("history-reset-btn");
-    if (reset) reset.style.display = "";
+    return data.points || [];
   } catch(e) {
-    console.warn("showFlightTrack failed:", e);
+    console.warn("fetchTrackPoints failed:", e);
+    return [];
   }
-}
-
-function clearFlightTrack(){
-  flightTrackLayer.clearLayers();
-  document.querySelectorAll("#history-list .flight-row.active").forEach(r => r.classList.remove("active"));
-  const reset = document.getElementById("history-reset-btn");
-  if (reset) reset.style.display = "none";
 }
 
 // Resolve a lat/lon to a human-friendly location name.
@@ -1352,23 +1456,101 @@ function resolveLocation(lat, lon, airportFromServer){
   return null;
 }
 
-async function showHistory(reg){
-  const cfg = FLEET.find(c => c.registration === reg);
-  if (!cfg) return;
-  openPanel("history-panel");
-  const title = document.getElementById("history-title");
-  if (title) {
-    title.textContent = `📋 ${cfg.label} · HISTORY`;
-    title.style.color = cfg.color;
-  }
-  const list = document.getElementById("history-list");
-  if (list) list.innerHTML = `<li class="history-empty">Loading…</li>`;
-  const flights = await fetchFlightsForReg(reg);
-  renderHistory(reg, cfg, flights);
+/* ==================================================================
+   HISTORY overlay — full-viewport view with sidebar (fleet cards +
+   flights list), dedicated Leaflet map for the selected flight's
+   track, and an SVG altitude-vs-time chart below the map.
+   Opened via the topbar HISTORY button OR any fleet card's 📋 button
+   (the latter pre-selects that aircraft).
+   ================================================================== */
+const historyState = {
+  selectedReg:   null,
+  selectedFlight: null,
+  map: null,
+  trackLayer: null,
+  initialized: false,
+};
+
+function initHistoryMap(){
+  if (historyState.initialized) return;
+  const el = document.getElementById("history-map");
+  if (!el) return;
+  historyState.map = L.map(el, { zoomControl: true, attributionControl: true, worldCopyJump: true })
+    .setView([BASE_LOCATION.lat, BASE_LOCATION.lon], 9);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+    subdomains: "abcd", maxZoom: 18,
+  }).addTo(historyState.map);
+  historyState.trackLayer = L.layerGroup().addTo(historyState.map);
+  historyState.initialized = true;
 }
 
-function renderHistory(reg, cfg, flights){
-  const list = document.getElementById("history-list");
+function renderHistoryFleetCards(){
+  const host = document.getElementById("ov-fleet-list");
+  if (!host) return;
+  const byCompany = new Map();
+  for (const cfg of FLEET) {
+    const co = cfg.company || "—";
+    if (!byCompany.has(co)) byCompany.set(co, []);
+    byCompany.get(co).push(cfg);
+  }
+  const sections = [];
+  for (const [companyName, cfgs] of byCompany) {
+    const cards = cfgs.map(cfg => {
+      const focusCls = historyState.selectedReg === cfg.registration ? " focused" : "";
+      const imgCls   = cfg.image ? " has-img" : "";
+      const imgStyle = cfg.image ? `; --ac-bg: url('${cfg.image}')` : "";
+      // Mini-card: no status row, no grid — just the label + reg.
+      return `<div class="fleet-card${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}">
+        <div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span></div>
+        <div class="fc-sub">${cfg.registration}</div>
+      </div>`;
+    }).join("");
+    sections.push(`<div class="company-group"><div class="company-header">${companyName}</div>${cards}</div>`);
+  }
+  host.innerHTML = sections.join("");
+  host.querySelectorAll(".fleet-card").forEach(card => {
+    card.addEventListener("click", () => loadHistoryForReg(card.dataset.reg));
+  });
+}
+
+async function loadHistoryForReg(reg){
+  const cfg = FLEET.find(c => c.registration === reg);
+  if (!cfg) return;
+  historyState.selectedReg = reg;
+  historyState.selectedFlight = null;
+  // Re-render cards to update the focused highlight
+  renderHistoryFleetCards();
+  // Subtitle + flights list header
+  const sub = document.getElementById("ov-subtitle");
+  if (sub) {
+    sub.textContent = `— ${cfg.label} (${cfg.registration})`;
+    sub.style.color = cfg.color;
+  }
+  const head = document.getElementById("ov-flights-head");
+  if (head) head.textContent = `${cfg.label.toUpperCase()} FLIGHTS`;
+  // Loading state
+  const list = document.getElementById("ov-flight-list");
+  if (list) list.innerHTML = `<li class="history-empty">Loading…</li>`;
+  // Clear stats + map + alt chart from any previously-selected flight
+  resetHistoryView();
+  // Fetch + render
+  const flights = await fetchFlightsForReg(reg);
+  renderHistoryFlightList(reg, cfg, flights);
+}
+
+function resetHistoryView(){
+  if (historyState.trackLayer) historyState.trackLayer.clearLayers();
+  const stats = document.getElementById("ov-stats");
+  if (stats) stats.innerHTML = `<div class="ov-stats-empty">SELECT A FLIGHT</div>`;
+  const chart = document.getElementById("ov-alt-chart");
+  if (chart) chart.innerHTML = `<div class="alt-empty">select a flight to see altitude profile</div>`;
+  const range = document.getElementById("ov-alt-range");
+  if (range) range.textContent = "";
+}
+
+function renderHistoryFlightList(reg, cfg, flights){
+  const list = document.getElementById("ov-flight-list");
   if (!list) return;
   if (!flights || flights.length === 0) {
     list.innerHTML = `<li class="history-empty">No flights logged for ${cfg.label} yet</li>`;
@@ -1399,7 +1581,7 @@ function renderHistory(reg, cfg, flights){
       const routeLine = (fromLoc || toLoc) || airborne
         ? `<div class="flight-route">${fromLoc || "scene"} → ${airborne ? "…" : (toLoc || "scene")}</div>`
         : "";
-      html.push(`<li class="flight-row ${airborne?"airborne":""}" data-flight-id="${f.id}" data-color="${color}" style="--ac-color:${color}">
+      html.push(`<li class="flight-row ${airborne?"airborne":""}" data-flight-id="${f.id}" style="--ac-color:${color}">
         <div class="flight-top"><span class="flight-call">${timeStr}</span><span class="flight-time">${duration}</span></div>
         ${routeLine}
         <div class="flight-stats"><span>ALT <b>${maxAlt}</b></span><span>SPD <b>${maxSpd}</b></span><span>DIST <b>${dist}</b></span></div>
@@ -1407,14 +1589,166 @@ function renderHistory(reg, cfg, flights){
     }
   }
   list.innerHTML = html.join("");
+  // Index flights by id for the click handler
+  const flightsById = new Map(flights.map(f => [String(f.id), f]));
   list.querySelectorAll(".flight-row").forEach(row => {
     row.addEventListener("click", () => {
       list.querySelectorAll(".flight-row").forEach(r => r.classList.remove("active"));
       row.classList.add("active");
-      showFlightTrack(row.dataset.flightId, row.dataset.color);
+      const f = flightsById.get(row.dataset.flightId);
+      if (f) selectHistoryFlight(f, cfg);
     });
   });
 }
+
+async function selectHistoryFlight(flight, cfg){
+  historyState.selectedFlight = flight;
+  const color = cfg.color || "#FFB800";
+
+  // ----- Stats strip -----
+  const airborne = flight.landing_time == null;
+  const durationStr = airborne ? "AIRBORNE"
+    : (flight.duration_sec ? `${Math.floor(flight.duration_sec/60)}m ${flight.duration_sec%60}s` : "—");
+  const maxAltStr = flight.max_alt_ft   ? `${Math.round(flight.max_alt_ft).toLocaleString()} ft`   : "—";
+  const maxSpdStr = flight.max_speed_kt ? `${Math.round(flight.max_speed_kt)} kt`                  : "—";
+  const distStr   = (flight.distance_nm != null && flight.distance_nm > 0)
+    ? `${flight.distance_nm.toFixed(1)} nm` : "—";
+  const fromLoc = resolveLocation(flight.takeoff_lat, flight.takeoff_lon, flight.airport_takeoff);
+  const toLoc   = airborne ? null : resolveLocation(flight.landing_lat, flight.landing_lon, flight.airport_landing);
+  const stats = document.getElementById("ov-stats");
+  if (stats) {
+    stats.innerHTML = `
+      <div class="ov-route" style="--ac-color:${color}">
+        <span class="val accent" style="color:${color}">${fromLoc || "scene"}</span>
+        <span class="arrow">→</span>
+        <span class="val accent" style="color:${color}">${airborne ? "…" : (toLoc || "scene")}</span>
+      </div>
+      <div class="ov-stat"><span class="lbl">DURATION</span><span class="val">${durationStr}</span></div>
+      <div class="ov-stat"><span class="lbl">DISTANCE</span><span class="val">${distStr}</span></div>
+      <div class="ov-stat"><span class="lbl">MAX ALT</span><span class="val">${maxAltStr}</span></div>
+      <div class="ov-stat"><span class="lbl">MAX SPD</span><span class="val">${maxSpdStr}</span></div>
+    `;
+  }
+
+  // ----- Fetch track points and draw -----
+  initHistoryMap();
+  // Ensure Leaflet recomputes size now that the container is visible.
+  setTimeout(() => historyState.map && historyState.map.invalidateSize(), 0);
+  if (historyState.trackLayer) historyState.trackLayer.clearLayers();
+
+  const points = await fetchTrackPoints(flight.id);
+  const latlngs = points
+    .map(p => [p.lat, p.lon])
+    .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+
+  if (latlngs.length >= 2) {
+    L.polyline(latlngs, { color, weight: 3, opacity: 0.95 }).addTo(historyState.trackLayer);
+    L.circleMarker(latlngs[0], { radius: 6, color, fillColor: "#0a0e1a", fillOpacity: 1, weight: 2 })
+      .addTo(historyState.trackLayer).bindPopup("Takeoff");
+    L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color, fillColor: color, fillOpacity: 1, weight: 2 })
+      .addTo(historyState.trackLayer).bindPopup("Landing");
+    historyState.map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40] });
+  } else if (latlngs.length === 1) {
+    historyState.map.setView(latlngs[0], 13);
+    L.circleMarker(latlngs[0], { radius: 6, color, fillColor: color, fillOpacity: 1, weight: 2 })
+      .addTo(historyState.trackLayer);
+  }
+
+  // ----- Altitude chart -----
+  renderAltChart(points, color);
+}
+
+function renderAltChart(points, color){
+  const host = document.getElementById("ov-alt-chart");
+  const rangeEl = document.getElementById("ov-alt-range");
+  if (!host) return;
+  // Need at least two points with a numeric altitude to draw anything meaningful.
+  const altPts = (points || []).filter(p => Number.isFinite(p.t) && Number.isFinite(p.alt));
+  if (altPts.length < 2) {
+    host.innerHTML = `<div class="alt-empty">no altitude data for this flight</div>`;
+    if (rangeEl) rangeEl.textContent = "";
+    return;
+  }
+  const W = 1000, H = 140, PAD_L = 44, PAD_R = 14, PAD_T = 8, PAD_B = 20;
+  const tMin = altPts[0].t, tMax = altPts[altPts.length - 1].t;
+  let altMin = Infinity, altMax = -Infinity;
+  for (const p of altPts) {
+    if (p.alt < altMin) altMin = p.alt;
+    if (p.alt > altMax) altMax = p.alt;
+  }
+  // Pad the Y range slightly so the line doesn't touch the top edge.
+  if (altMin === altMax) { altMax = altMin + 100; }
+  const yPad = (altMax - altMin) * 0.12;
+  const yMin = Math.max(0, altMin - yPad), yMax = altMax + yPad;
+
+  const xScale = (t) => PAD_L + ((t - tMin) / (tMax - tMin || 1)) * (W - PAD_L - PAD_R);
+  const yScale = (a) => H - PAD_B - ((a - yMin) / (yMax - yMin || 1)) * (H - PAD_T - PAD_B);
+
+  let linePath = "";
+  let fillPath = "";
+  altPts.forEach((p, i) => {
+    const x = xScale(p.t).toFixed(1), y = yScale(p.alt).toFixed(1);
+    linePath += `${i === 0 ? "M" : "L"} ${x} ${y} `;
+    if (i === 0) fillPath = `M ${x} ${(H - PAD_B).toFixed(1)} L ${x} ${y} `;
+    else fillPath += `L ${x} ${y} `;
+  });
+  const lastX = xScale(altPts[altPts.length - 1].t).toFixed(1);
+  fillPath += `L ${lastX} ${(H - PAD_B).toFixed(1)} Z`;
+
+  // Y axis labels: min, mid, max — rounded to a tidy hundred so they read cleanly.
+  const niceRound = (v) => Math.round(v / 100) * 100;
+  const yLabels = [niceRound(yMin), niceRound((yMin + yMax) / 2), niceRound(yMax)]
+    .map(a => `<text x="${PAD_L - 6}" y="${(yScale(a) + 3).toFixed(1)}" text-anchor="end" class="alt-label">${a.toLocaleString()}</text>`)
+    .join("");
+  // X axis: start + end clock time
+  const fmtClk = (ms) => new Date(ms).toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  const xLabels =
+    `<text x="${PAD_L}" y="${H - 6}" class="alt-label">${fmtClk(tMin)}</text>` +
+    `<text x="${W - PAD_R}" y="${H - 6}" text-anchor="end" class="alt-label">${fmtClk(tMax)}</text>` +
+    `<text x="${PAD_L - 6}" y="${(PAD_T + 8).toFixed(1)}" text-anchor="end" class="alt-label">ft</text>`;
+  // Horizontal grid (top + bottom of plot area)
+  const grid =
+    `<line x1="${PAD_L}" y1="${(H - PAD_B).toFixed(1)}" x2="${W - PAD_R}" y2="${(H - PAD_B).toFixed(1)}" class="alt-axis"/>` +
+    `<line x1="${PAD_L}" y1="${PAD_T.toFixed(1)}"      x2="${W - PAD_R}" y2="${PAD_T.toFixed(1)}"      class="alt-axis" opacity="0.4"/>`;
+  host.innerHTML = `
+    <svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" class="alt-svg">
+      ${grid}
+      <path d="${fillPath}" class="alt-fill" fill="${color}"/>
+      <path d="${linePath}" class="alt-line" stroke="${color}"/>
+      ${yLabels}${xLabels}
+    </svg>`;
+  if (rangeEl) rangeEl.textContent = `${Math.round(altMin).toLocaleString()}–${Math.round(altMax).toLocaleString()} ft`;
+}
+
+function openHistoryOverlay(preselectReg){
+  const overlay = document.getElementById("history-overlay");
+  if (!overlay) return;
+  overlay.classList.remove("hidden");
+  // Init the map lazily so it gets a non-zero container size.
+  initHistoryMap();
+  setTimeout(() => historyState.map && historyState.map.invalidateSize(), 50);
+  // Render aircraft cards every open (FLEET could have changed)
+  renderHistoryFleetCards();
+  if (preselectReg) {
+    loadHistoryForReg(preselectReg);
+  } else if (historyState.selectedReg) {
+    // Refresh the flights list for the previously-selected aircraft.
+    loadHistoryForReg(historyState.selectedReg);
+  } else {
+    // Nothing selected → empty right pane, prompt user via the list.
+    const list = document.getElementById("ov-flight-list");
+    if (list) list.innerHTML = `<li class="history-empty">Pick an aircraft from the fleet list →</li>`;
+    resetHistoryView();
+  }
+}
+
+function closeHistoryOverlay(){
+  const overlay = document.getElementById("history-overlay");
+  if (overlay) overlay.classList.add("hidden");
+}
+
+// Per-card 📋 shortcut + topbar HISTORY button both route here.
+function showHistory(reg){ openHistoryOverlay(reg); }
 
 /* ---------- Warm start: pre-populate fleet positions from worker D1 ----------
    The Durable Object has been polling adsb.lol every 3s and storing last-known
@@ -1656,14 +1990,22 @@ function initUI(){
   devOpen.addEventListener("click", () => { devPanel.classList.remove("hidden"); devOpen.style.display = "none"; });
   devClose.addEventListener("click", () => { devPanel.classList.add("hidden"); devOpen.style.display = ""; });
 
-  // ===== OPTIONS / TRAFFIC / HISTORY floating panels — mutex triggers + close buttons =====
+  // ===== OPTIONS / TRAFFIC floating panels — mutex triggers + close buttons =====
   document.getElementById("options-open-btn").addEventListener("click", () => togglePanel("options-panel"));
   document.getElementById("traffic-open-btn").addEventListener("click", () => togglePanel("traffic-panel"));
   document.querySelectorAll(".float-close-btn").forEach(btn => {
     btn.addEventListener("click", () => closePanel(btn.dataset.target));
   });
-  // CLEAR TRACK lives inside the history panel now
-  document.getElementById("history-reset-btn").addEventListener("click", clearFlightTrack);
+
+  // ===== HISTORY overlay — topbar trigger + close button. ESC also closes it. =====
+  document.getElementById("history-open-btn").addEventListener("click", () => openHistoryOverlay());
+  document.getElementById("ov-close-btn").addEventListener("click", closeHistoryOverlay);
+  document.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") {
+      const ov = document.getElementById("history-overlay");
+      if (ov && !ov.classList.contains("hidden")) closeHistoryOverlay();
+    }
+  });
 
   // ===== Mobile fleet drawer — handle bar toggles the panel up/down =====
   // Handle exists in the DOM on all sizes but is CSS-hidden on desktop, so this
