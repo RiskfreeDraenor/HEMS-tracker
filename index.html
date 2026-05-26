@@ -672,7 +672,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0043</div>
+  <div id="version">v.0044</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1346,7 +1346,7 @@ function resolveLocation(lat, lon, airportFromServer){
   if (airportFromServer) return airportFromServer;
   for (const cfg of FLEET) {
     if (cfg.base && Number.isFinite(cfg.base.lat) && Number.isFinite(cfg.base.lon)) {
-      if (distanceNm(cfg.base.lat, cfg.base.lon, lat, lon) <= 0.5) return cfg.base.name;
+      if (distanceNm(cfg.base.lat, cfg.base.lon, lat, lon) <= 2.5) return cfg.base.name;
     }
   }
   return null;

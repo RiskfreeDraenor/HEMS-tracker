@@ -43,8 +43,12 @@ const GROUND_ALT_FT        = 100;
 const GROUND_GS_KT         = 30;
 
 /* ---- Airport-lookup tolerance ------------------------------------------- */
-const AIRPORT_MAX_NM   = 0.5;       // closer than this counts as "at" the airport
-const AIRPORT_BBOX_DEG = 0.02;      // pre-filter bbox before haversine sort
+// 2.5nm is loose enough that the "last airborne fix" before a heliport landing
+// still identifies the right pad (ADS-B's last sample is often a few hundred
+// meters from the actual touchdown). Multiple airports may now be in range —
+// findNearestAirport() picks the closest, which is the right call.
+const AIRPORT_MAX_NM   = 2.5;       // closer than this counts as "at" the airport
+const AIRPORT_BBOX_DEG = 0.05;      // pre-filter bbox (~3nm) before haversine sort
 
 // ============================================================================
 //  Worker entry point
