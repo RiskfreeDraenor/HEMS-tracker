@@ -89,7 +89,8 @@ export default {
       "  /log/state                 current fleet state\n" +
       "  /log/flights?reg=…         flight history\n" +
       "  /log/flight/<id>/track     track points\n" +
-      "  /log/airport?lat=&lon=     nearest airport (debug)\n",
+      "  /log/airport?lat=&lon=     nearest airport (debug)\n" +
+      "  /log/photo?hex=|reg=       Planespotters photo proxy\n",
       { status: 200, headers: { ...corsHeaders(), "Content-Type": "text/plain" } }
     );
   },
@@ -254,6 +255,35 @@ export class TrackerDO {
 
     if (url.pathname === "/log/heartbeat") {
       return new Response(JSON.stringify({ ok: true, t: Date.now() }), { headers: jhdrs });
+    }
+
+    // ---- Aircraft-photo proxy (Planespotters Pub API) -----------------------
+    // Self-contained, additive endpoint. Accepts ?hex=<icao24> or ?reg=<tail>.
+    // Calls https://api.planespotters.net/pub/photos/(hex|reg)/<value> and forwards
+    // the JSON back. Cloudflare caches the upstream response for 24h via cf.cacheTtl,
+    // so we hit Planespotters at most once per aircraft per day. Failures (no photo,
+    // upstream down, malformed input) return {photos: []} so the browser falls back
+    // gracefully — nothing else in the app depends on this working.
+    if (url.pathname === "/log/photo") {
+      const hex = (url.searchParams.get("hex") || "").trim();
+      const reg = (url.searchParams.get("reg") || "").trim();
+      if (!hex && !reg) {
+        return new Response(JSON.stringify({ error: "need ?hex=<icao24> or ?reg=<tail>" }), { status: 400, headers: jhdrs });
+      }
+      const upstream = hex
+        ? `https://api.planespotters.net/pub/photos/hex/${encodeURIComponent(hex.toUpperCase())}`
+        : `https://api.planespotters.net/pub/photos/reg/${encodeURIComponent(reg.toUpperCase())}`;
+      try {
+        const r = await fetch(upstream, {
+          headers: { "Accept": "application/json", "User-Agent": "HEMSTracker/1.0 (+https://hemsnj.com)" },
+          cf: { cacheTtl: 86400, cacheEverything: true },
+        });
+        if (!r.ok) return new Response(JSON.stringify({ photos: [] }), { headers: { ...jhdrs, "Cache-Control": "public, max-age=3600" } });
+        const data = await r.json().catch(() => ({ photos: [] }));
+        return new Response(JSON.stringify(data), { headers: { ...jhdrs, "Cache-Control": "public, max-age=86400" } });
+      } catch (e) {
+        return new Response(JSON.stringify({ photos: [], error: String(e && e.message || e) }), { headers: jhdrs });
+      }
     }
 
     return new Response(JSON.stringify({ error: "not found" }), { status: 404, headers: jhdrs });

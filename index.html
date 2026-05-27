@@ -231,6 +231,23 @@ const SETTINGS = {
   .fleet-card.has-img.focused {
     background-image: linear-gradient(rgba(22,28,52,0.45), rgba(22,28,52,0.6)), var(--ac-bg);
   }
+  /* Auto-photo from the Planespotters API — applied by the AircraftPhoto module
+     only on cards that don't already have a manual cfg.image (has-img wins). */
+  .fleet-card.has-photo:not(.has-img) {
+    background-image: linear-gradient(rgba(17,22,42,0.55), rgba(17,22,42,0.7)), var(--ac-photo);
+    background-size: cover, cover;
+    background-position: center, center;
+    background-repeat: no-repeat, no-repeat;
+  }
+  .fleet-card.has-photo:not(.has-img):hover,
+  .fleet-card.has-photo:not(.has-img).focused {
+    background-image: linear-gradient(rgba(22,28,52,0.45), rgba(22,28,52,0.6)), var(--ac-photo);
+  }
+  .fc-photo-credit {
+    position: absolute; bottom: 4px; right: 8px;
+    font-size: 8px; letter-spacing: .04em; color: rgba(255,255,255,0.55);
+    pointer-events: none; font-style: italic; text-shadow: 0 0 4px rgba(0,0,0,0.8);
+  }
   .fleet-card:last-child { margin-bottom: 0; }
   .fleet-card.offline { border-left-color: var(--c-dim); opacity: .65; }
   .fc-top { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
@@ -880,7 +897,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0050</div>
+  <div id="version">v.0051</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1385,6 +1402,100 @@ function render(){
   renderPanel(primaryAc,trafficItems);
 }
 
+/* ============================================================
+   AircraftPhoto — self-contained Planespotters photo module
+   ============================================================
+   Pulls aircraft photos via the worker's /log/photo proxy (which
+   caches Planespotters' public API for 24h on Cloudflare's edge).
+   Decorates fleet cards with the photo as a background image and
+   appends a tiny photographer credit per Planespotters' attribution
+   requirement.
+
+   ISOLATION CONTRACT:
+   • Owns its own cache + inflight Maps — does not touch `state`.
+   • Single external surface: AircraftPhoto.decorateCard(el, opts).
+   • Called from renderPanel() (right-panel cards) and from
+     renderHistoryFleetCards() (history overlay sidebar).
+   • If anything in here throws or the API is down, decorateCard
+     bails silently and the rest of the app renders exactly like
+     it did before this module existed.
+   ============================================================ */
+const AircraftPhoto = (() => {
+  const cache    = new Map();   // key → { status, thumb?, link?, photographer? }
+  const inflight = new Map();   // key → Promise
+
+  const _key = (v) => String(v || "").toUpperCase().trim();
+
+  async function fetchPhoto(opts) {
+    const k = _key(opts.hex || opts.reg);
+    if (!k) return null;
+    if (cache.has(k))    return cache.get(k);
+    if (inflight.has(k)) return inflight.get(k);
+    if (typeof workerLogBase !== "string" || !workerLogBase) return null;
+
+    const qs = opts.hex
+      ? `hex=${encodeURIComponent(opts.hex)}`
+      : `reg=${encodeURIComponent(opts.reg)}`;
+    const p = (async () => {
+      try {
+        const res = await fetch(`${workerLogBase}/photo?${qs}`);
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = await res.json();
+        const photo = data && Array.isArray(data.photos) && data.photos[0];
+        const result = photo ? {
+          status: "ok",
+          thumb: (photo.thumbnail_large && photo.thumbnail_large.src) || (photo.thumbnail && photo.thumbnail.src) || null,
+          link:  photo.link || null,
+          photographer: photo.photographer || "",
+        } : { status: "none" };
+        cache.set(k, result);
+        return result;
+      } catch (e) {
+        const result = { status: "error" };
+        cache.set(k, result);
+        return result;
+      } finally {
+        inflight.delete(k);
+      }
+    })();
+    inflight.set(k, p);
+    return p;
+  }
+
+  // Pre-load the image off-DOM so we don't briefly paint a broken background
+  // if Planespotters' CDN 404s the actual file.
+  function _preload(url) {
+    return new Promise((resolve) => {
+      const img = new Image();
+      img.onload  = () => resolve(true);
+      img.onerror = () => resolve(false);
+      img.src = url;
+    });
+  }
+
+  async function decorateCard(cardEl, opts) {
+    try {
+      if (!cardEl || cardEl.classList.contains("has-img")) return;   // manual image wins
+      const result = await fetchPhoto(opts);
+      if (!result || result.status !== "ok" || !result.thumb) return;
+      // Cards re-render on every tick — bail if this element was already replaced.
+      if (!cardEl.isConnected) return;
+      const ok = await _preload(result.thumb);
+      if (!ok || !cardEl.isConnected || cardEl.classList.contains("has-img")) return;
+      cardEl.style.setProperty("--ac-photo", `url('${result.thumb}')`);
+      cardEl.classList.add("has-photo");
+      if (result.photographer && !cardEl.querySelector(".fc-photo-credit")) {
+        const c = document.createElement("div");
+        c.className = "fc-photo-credit";
+        c.textContent = `📷 ${result.photographer}`;
+        cardEl.appendChild(c);
+      }
+    } catch (_e) { /* swallow — never crash the host render */ }
+  }
+
+  return { fetchPhoto, decorateCard };
+})();
+
 function renderPanel(primaryAc,trafficItems){
   const byCompany=new Map();
   for(const cfg of FLEET){
@@ -1419,6 +1530,15 @@ function renderPanel(primaryAc,trafficItems){
         document.body.classList.remove("drawer-open");
       }
     });
+    // Auto-photo decoration (Planespotters proxy). Manual cfg.image always wins
+    // — has-img cards short-circuit inside decorateCard. Skip non-real hex codes
+    // (CACHED/BASE/SIM/TEST) and fall back to registration lookup instead.
+    const reg = card.dataset.reg;
+    const ac  = reg ? state.fleet[reg] : null;
+    const opts = (ac && ac.hex && !/^(?:CACHED|BASE|SIM|TEST)_/.test(ac.hex))
+      ? { hex: ac.hex }
+      : (reg ? { reg } : null);
+    if (opts) AircraftPhoto.decorateCard(card, opts);
   });
 
   let list=trafficItems.map(({ac})=>{
@@ -1589,6 +1709,9 @@ function renderHistoryFleetCards(){
   host.innerHTML = sections.join("");
   host.querySelectorAll(".fleet-card").forEach(card => {
     card.addEventListener("click", () => loadHistoryForReg(card.dataset.reg));
+    // Auto-photo decoration via the AircraftPhoto module (registration lookup —
+    // the history sidebar doesn't have live ac.hex per card).
+    if (card.dataset.reg) AircraftPhoto.decorateCard(card, { reg: card.dataset.reg });
   });
 }
 
