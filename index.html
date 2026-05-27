@@ -591,6 +591,18 @@ const SETTINGS = {
   .pop-row { display: flex; justify-content: space-between; padding: 3px 0; font-size: 11px; }
   .pop-row span { color: var(--c-muted); letter-spacing: .15em; font-size: 10px; }
   .pop-row b { color: var(--c-text); font-weight: 500; }
+  /* Planespotters photo at the top of an aircraft popup. Bleeds to the edges
+     (negative margins cancel .pop's padding) and stays under the title row. */
+  .pop-photo {
+    margin: -10px -12px 8px; position: relative; background: #000; overflow: hidden;
+  }
+  .pop-photo img { display: block; width: 100%; height: 120px; object-fit: cover; }
+  .pop-photo .pop-credit {
+    position: absolute; bottom: 3px; right: 6px;
+    font-size: 9px; letter-spacing: 0; font-style: italic;
+    color: rgba(255,255,255,0.78); text-shadow: 0 0 4px rgba(0,0,0,0.9);
+    pointer-events: none;
+  }
 
   #version { position: fixed; bottom: 6px; left: 6px; z-index: 1000; font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; color: var(--c-muted); background: rgba(10,14,26,.8); padding: 3px 8px; border: 1px solid var(--c-border); pointer-events: none; }
 
@@ -897,7 +909,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0052</div>
+  <div id="version">v.0053</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1279,7 +1291,13 @@ function popupHtml(ac,fleetCfg,primaryAc,isBase,fromLabel){
     distLine=`<div class="pop-row"><span>FROM ${fromLabel||primary.label}</span><b>${fmtDistance(d)} · ${Math.round(b)}° ${compassOctant(b)}</b></div>`;
   }
   const title=fleetCfg?`<span class="pop-tag fleet">FLEET</span> ${fleetCfg.label}`:(flt!=="—"?flt:reg);
-  return `<div class="pop"><div class="pop-title">${title}</div>
+  // Synchronous photo embed from the AircraftPhoto cache. If not cached yet,
+  // the popupopen handler (registered when the marker is created) does the
+  // async fetch and injects the photo into the open popup.
+  const photoHtml = (typeof AircraftPhoto !== "undefined")
+    ? AircraftPhoto.popupMarkup({ hex: ac.hex, reg: ac.r })
+    : "";
+  return `<div class="pop">${photoHtml}<div class="pop-title">${title}</div>
     <div class="pop-row"><span>REG</span><b>${reg}</b></div>
     <div class="pop-row"><span>TYPE</span><b>${type}</b></div>
     <div class="pop-row"><span>ALT</span><b>${alt}</b></div>
@@ -1370,7 +1388,33 @@ function render(){
     const icon=buildIcon({ac,fleetCfg,isNear,primaryAc,isBase});
     let m=markerByHex.get(ac.hex);
     if(m){m.setLatLng([mLat,mLon]);m.setIcon(icon);}
-    else{m=L.marker([mLat,mLon],{icon,riseOnHover:true}).addTo(layer);m.on("click",()=>{state.selectedHex=ac.hex;});markerByHex.set(ac.hex,m);}
+    else{
+      m=L.marker([mLat,mLon],{icon,riseOnHover:true}).addTo(layer);
+      m.on("click",()=>{state.selectedHex=ac.hex;});
+      // Photo on popup open — only attached once per marker lifecycle so we
+      // don't accumulate listeners across re-renders. Skip base markers (no
+      // real aircraft hex on those). Closure captures the stable hex.
+      if (!isBase) {
+        const acHex = ac.hex;
+        const acReg = ac.r;
+        m.on("popupopen", async (e) => {
+          try {
+            if (AircraftPhoto.getCached({ hex: acHex, reg: acReg })) return;
+            const popEl = e.popup && e.popup.getElement && e.popup.getElement();
+            const inner = popEl && popEl.querySelector(".pop");
+            if (!inner || inner.querySelector(".pop-photo")) return;
+            const result = await AircraftPhoto.fetchPhoto({ hex: acHex, reg: acReg });
+            if (!result || result.status !== "ok" || !result.thumb) return;
+            if (!inner.isConnected) return;
+            const html = AircraftPhoto.popupMarkup({ hex: acHex, reg: acReg });
+            if (!html) return;
+            inner.insertAdjacentHTML("afterbegin", html);
+            if (typeof e.popup.update === "function") e.popup.update();
+          } catch (_e) { /* swallow — never break the popup */ }
+        });
+      }
+      markerByHex.set(ac.hex,m);
+    }
     m.bindPopup(popupHtml(ac,fleetCfg,primaryAc,isBase,focusedCfg.label),{className:"ac-popup",closeButton:false,offset:[0,-8]});
     if(state.selectedHex===ac.hex&&!m.isPopupOpen())m.openPopup();
   }
@@ -1519,7 +1563,19 @@ const AircraftPhoto = (() => {
     };
   }
 
-  return { fetchPhoto, decorateCard, getCached, inlineMarkup };
+  // HTML snippet for aircraft popups (Leaflet popup body). Returns "" when no
+  // photo is cached — popupHtml() just renders without it, and the popupopen
+  // handler will inject one once the async fetch finishes.
+  function popupMarkup(opts) {
+    const cached = getCached(opts);
+    if (!cached || !cached.thumb) return "";
+    const credit = cached.photographer
+      ? `<div class="pop-credit">📷 ${_esc(cached.photographer)}</div>`
+      : "";
+    return `<div class="pop-photo"><img src="${cached.thumb}" alt="" loading="lazy"/>${credit}</div>`;
+  }
+
+  return { fetchPhoto, decorateCard, getCached, inlineMarkup, popupMarkup };
 })();
 
 function renderPanel(primaryAc,trafficItems){
