@@ -30,7 +30,7 @@
 // ============================================================================
 
 /* ---- Fleet config — KEEP IN SYNC WITH index.html FLEET[].registration ---- */
-const FLEET_REGS = ["N732HM", "N551HU", "N456MT"];
+const FLEET_REGS = ["N732HM", "N551HU", "N456MT", "N135TJ", "N137MH", "N3NJ", "N5NJ", "N9NJ"];
 
 /* ---- Polling area: bbox covers all fleet bases in one adsb.lol request --- */
 const BBOX_CENTER     = { lat: 40.6, lon: -74.3 };  // centroid of NJ HEMS bases
