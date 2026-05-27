@@ -8,9 +8,8 @@ also auto-load and reinforce the conventions below.
 > 5 companies), a smooth-tracking pipeline (bbox poll + outlier filter +
 > dead-reckoning), a full-viewport HISTORY overlay with dedicated map +
 > altitude chart, automatic aircraft photos via the Planespotters API, a
-> ground-up mobile rework with a side drawer + hamburger, a handful of iOS
-> quirks fixed, and a dual-feed ADS-B setup (adsb.lol primary, adsbexchange
-> as fallback only — see Section 7-E). **Current live version: v.0057.**
+> ground-up mobile rework with a side drawer + hamburger, and a handful of
+> iOS quirks fixed. **Current live version: v.0058.**
 
 ---
 
@@ -61,8 +60,7 @@ Things explicitly **not** important to the user:
 ```
                        Cloudflare (Workers Paid, ~$5/mo)
                        ─────────────────────────────────
-   browser ─ /v2/* ──────────────► fetchAdsb() ┬─► api.adsb.lol          (primary)
-                                                 └─► adsbexchange (RapidAPI, fallback)
+   browser ─ /v2/* ──────────────► fetchAdsb() ──► api.adsb.lol
    browser ─ /log/state ──────────► hemstracker worker ──► D1 (cached state)
    browser ─ /log/flights ────────► hemstracker worker ──► D1 (flight history)
    browser ─ /log/flight/<id>/track ► hemstracker worker ──► D1 (track points)
@@ -76,7 +74,7 @@ Things explicitly **not** important to the user:
                                        + cron heartbeat * * * * *
                                        state-machines fleet aircraft → D1
                                        calls fetchAdsb() with bbox 150 nm
-                                       around NJ centroid (same fallback chain)
+                                       around NJ centroid
 ```
 
 - **Browser** (GitHub Pages, hemsnj.com): polls adsb.lol via the worker every
@@ -275,40 +273,28 @@ Photographer credit: small italic text bottom-right of each card (`.fc-photo-cre
 and bottom-right of each popup photo (`.pop-credit`). Required by Planespotters'
 attribution terms.
 
-### 7-D. Dual-feed ADS-B with fallback (v.0055–v.0057)
+### 7-D. ADS-B feed (adsb.lol only) — fetchAdsb() helper
 
 Worker-side function `fetchAdsb(env, path)` at the top of
-`cloudflare-worker.js` is the single chokepoint for all ADS-B feed calls.
+`cloudflare-worker.js` is the single chokepoint for ADS-B feed calls.
 Both the `/v2/*` browser proxy AND the DO's bbox polling go through it.
 
-**Current setup (v.0057, the right one): adsb.lol primary, adsbexchange fallback.**
+Currently a one-source proxy: hits `api.adsb.lol` with a 6-second
+AbortController timeout, returns a synthetic 502
+(`{ ac: [], error: "..." }`) on exception so callers never choke.
 
-- adsb.lol is hit first on every `/v2/*` request (free, unlimited).
-- adsbexchange (via RapidAPI) is only called when adsb.lol returns non-2xx
-  or times out — using `env.ADSBX_API_KEY` as the wrangler secret.
-- If both fail (or no secret configured), worker returns a synthetic
-  `{ ac: [], error: "all upstreams failed" }` with status 502.
-
-**DO NOT flip this to "adsbexchange primary" unless the user has upgraded
-their RapidAPI plan.** They were briefly on this (v.0056) and we discovered
-the user is on **RapidAPI Basic ($10/mo, 10k requests/month included, hard
-capped)**. At our 3s polling cadence the DO alone would burn the cap in ~8
-hours; any further calls 429 (Basic plans are hard capped, no overage
-charges — just rate-limit errors). v.0057 reverted to fallback-only and
-is the safe default.
-
-If the user later upgrades to Ultra/Mega tier, you can flip the order
-inside `fetchAdsb()` — it's literally just reordering the two `try`
-blocks. Comments in the worker call out where.
-
-**ADSBX_API_KEY** is stored as a Cloudflare Worker secret. To check or
-re-create it:
-```
-npx wrangler secret list
-npx wrangler secret put ADSBX_API_KEY
-```
-Or set it via the Cloudflare dashboard: Workers & Pages → hemstracker →
-Settings → Variables and Secrets → +Add → Type: Secret.
+**History note — adsbexchange fallback was tried + removed:**
+- v.0055 added a fallback path to adsbexchange (RapidAPI, via
+  `ADSBX_API_KEY` wrangler secret).
+- v.0056 briefly flipped adsbexchange to primary, reverted same day
+  (v.0057) after we realized the user is on RapidAPI Basic ($10/mo).
+- v.0058 ripped the fallback out entirely. User decided the complexity
+  + unknown billing behavior wasn't worth it; adsb.lol is reliable
+  enough on its own. The helper still has the 6s abort + safety 502 so
+  re-adding a fallback later is a one-block diff.
+- `ADSBX_API_KEY` Cloudflare secret may still exist — harmless if so
+  (worker no longer references it). Run `npx wrangler secret delete
+  ADSBX_API_KEY` to clean it up if you want.
 
 ### 7-E. Mobile UX (v.0049, v.0054)
 
@@ -394,16 +380,16 @@ iOS-specific fixes:
     accidental browser pinch-zoom on the chrome (the disappearing-topbar
     bug). `100dvh` for layout heights so iOS Safari's URL bar dynamics
     don't break things.
-20. **Dual-feed ADS-B with fallback (v.0055–v.0057)** — added a worker-side
-    `fetchAdsb()` helper so the `/v2/*` proxy + DO polling can fall back to
-    adsbexchange (RapidAPI) when adsb.lol hiccups. Briefly tried
-    adsbexchange-as-primary in v.0056; reverted in v.0057 because the user
-    is on the $10 Basic RapidAPI plan (10k/mo hard cap — would exhaust in
-    ~8 hours). adsb.lol primary, adsbexchange fallback only.
+20. **Dual-feed ADS-B experiment (v.0055–v.0058)** — added a worker-side
+    `fetchAdsb()` helper that tried adsbexchange (RapidAPI) as fallback,
+    briefly flipped adsbexchange to primary in v.0056, reverted same day
+    in v.0057 (user is on $10 Basic — 10k/mo cap), then removed the
+    entire fallback in v.0058. adsb.lol-only now. Helper kept (6s
+    timeout + safety 502); re-adding fallback later is a one-block diff.
 
 ## 9. Current state
 
-- **Live at hemsnj.com**, version **v.0057**.
+- **Live at hemsnj.com**, version **v.0058**.
 - **Fleet: 8 aircraft, 5 companies** (see Section 5 for the colors):
   - `N732HM` — "Hackensack 2" — Brick (40.0783 / -74.1321), `pictures/732hm.png`, custom EC135 icon
   - `N551HU` — "Hackensack 1" — West Milford (41.1328 / -74.3406), `pictures/511HU.png`, custom EC135 icon
@@ -535,11 +521,8 @@ curl 'https://hemstracker.deltasteelfox92.workers.dev/log/photo?reg=N3NJ'
 curl 'https://hemstracker.deltasteelfox92.workers.dev/log/photo?hex=a3f930'
 
 # Live position of one aircraft (browser used to use this; switched to bbox in v.0043).
-# All /v2/* paths route through fetchAdsb() — adsb.lol primary, adsbexchange fallback.
+# All /v2/* paths route through fetchAdsb() — adsb.lol only since v.0058.
 curl https://hemstracker.deltasteelfox92.workers.dev/v2/reg/N732HM
-
-# Confirm the adsbexchange secret is attached
-npx wrangler secret list
 ```
 
 ```bash

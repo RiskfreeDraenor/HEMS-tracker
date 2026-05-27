@@ -2,8 +2,7 @@
 //  HEMS Tracker — Cloudflare Worker
 //
 //  Two responsibilities:
-//   1) /v2/*  → ADS-B feed for the browser. adsb.lol primary; adsbexchange
-//               (RapidAPI, via ADSBX_API_KEY) only kicks in on primary failure.
+//   1) /v2/*  → ADS-B feed for the browser. Pure adsb.lol proxy (with timeout).
 //   2) TrackerDO Durable Object polls adsb.lol every 3s, runs a state
 //      machine on each fleet aircraft, and writes flight records to D1.
 //      Browser reads history through /log/* endpoints below.
@@ -22,7 +21,7 @@
 //    "* * * * *"  — heartbeat every minute
 //
 //  ENDPOINTS:
-//    /v2/*                       ADS-B feed (adsb.lol primary, adsbexchange fallback)
+//    /v2/*                       adsb.lol passthrough
 //    /log/state                  current state of every fleet aircraft
 //    /log/flights?reg=…&limit=…  flight history (newest first)
 //    /log/flight/<id>/track      full track points for one flight
@@ -52,21 +51,17 @@ const AIRPORT_MAX_NM   = 2.5;       // closer than this counts as "at" the airpo
 const AIRPORT_BBOX_DEG = 0.05;      // pre-filter bbox (~3nm) before haversine sort
 
 // ============================================================================
-//  ADS-B feed with fallback (adsb.lol primary, adsbexchange fallback)
+//  ADS-B feed (adsb.lol only)
 // ============================================================================
-// adsb.lol is fast and free with no quota — perfect for the high-volume
-// polling (DO bbox + browser bbox, each every 3s). adsbexchange via RapidAPI
-// gets hit ONLY when adsb.lol fails (non-2xx or timeout). This keeps the
-// RapidAPI usage in the hundreds-per-month range instead of the millions,
-// so the user's $10 Basic plan (10k/mo included) is plenty. If no
-// ADSBX_API_KEY secret is configured, adsb.lol just runs without any
-// fallback. Both endpoints serve the same `/v2/...` path shape and the
-// same JSON, so callers don't need to know which source answered.
+// Single source: adsb.lol. Free, unlimited, no key. We briefly experimented
+// with an adsbexchange (RapidAPI) fallback in v.0055–v.0057 — pulled in
+// v.0058 because we couldn't get a clean answer on whether the displayed
+// 10k/month Basic quota would ever start getting enforced. Helper kept
+// (with its 6s abort timeout + synthetic-502 safety net) so adding a
+// fallback again later is just one extra try/catch block.
 const ADSB_LOL_HOST   = "api.adsb.lol";
-const ADSBX_HOST      = "adsbexchange-com1.p.rapidapi.com";
 const ADSB_TIMEOUT_MS = 6000;
-async function fetchAdsb(env, path) {
-  let primaryErr = null;
+async function fetchAdsb(_env, path) {
   try {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
@@ -75,36 +70,12 @@ async function fetchAdsb(env, path) {
       signal: ctrl.signal,
     });
     clearTimeout(t);
-    if (res.ok) return res;
-    primaryErr = new Error(`adsb.lol HTTP ${res.status}`);
+    return res;
   } catch (e) {
-    primaryErr = e;
+    console.error(`adsb.lol fetch failed: ${e && e.message || e}`);
   }
-
-  // Fallback: only when configured AND adsb.lol actually failed
-  if (env && env.ADSBX_API_KEY) {
-    console.warn(`adsb.lol failed (${primaryErr && primaryErr.message || "unknown"}); falling back to adsbexchange`);
-    try {
-      const ctrl = new AbortController();
-      const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
-      const res = await fetch(`https://${ADSBX_HOST}${path}`, {
-        headers: {
-          "X-RapidAPI-Key":  env.ADSBX_API_KEY,
-          "X-RapidAPI-Host": ADSBX_HOST,
-          "Accept":          "application/json",
-          "User-Agent":      "hems-tracker/1.0",
-        },
-        signal: ctrl.signal,
-      });
-      clearTimeout(t);
-      return res;
-    } catch (e2) {
-      console.error(`adsbexchange fallback also failed: ${e2 && e2.message || e2}`);
-    }
-  }
-  // Both failed (or no fallback configured) — return a synthetic 502 with the
-  // same shape callers expect, so nothing chokes downstream.
-  return new Response(JSON.stringify({ ac: [], error: "all upstreams failed" }), {
+  // Synthetic 502 with the JSON shape callers expect, so nothing chokes downstream.
+  return new Response(JSON.stringify({ ac: [], error: "adsb.lol unavailable" }), {
     status: 502,
     headers: { "Content-Type": "application/json" },
   });
@@ -118,8 +89,7 @@ export default {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
 
-    // ADS-B feed proxy — tries adsb.lol first, falls back to adsbexchange (RapidAPI)
-    // when the primary fails or times out. See fetchAdsb() above.
+    // adsb.lol proxy via the shared fetchAdsb() helper (6s timeout + safety 502).
     if (url.pathname.startsWith("/v2/")) {
       const res  = await fetchAdsb(env, `${url.pathname}${url.search}`);
       const body = await res.text();
@@ -138,7 +108,7 @@ export default {
     return new Response(
       "HEMS Tracker proxy + logger.\n" +
       "Endpoints:\n" +
-      "  /v2/*                      ADS-B feed (adsb.lol primary, adsbexchange fallback)\n" +
+      "  /v2/*                      adsb.lol passthrough\n" +
       "  /log/state                 current fleet state\n" +
       "  /log/flights?reg=…         flight history\n" +
       "  /log/flight/<id>/track     track points\n" +
@@ -363,9 +333,8 @@ export class TrackerDO {
     try { await this.state.storage.setAlarm(Date.now() + POLL_INTERVAL_MS); } catch (e) { console.error("setAlarm:", e); }
 
     try {
-      // Use the shared adsb.lol → adsbexchange fallback helper so the DO gets
-      // the same redundancy as the browser proxy. Spotty primary samples
-      // no longer cause silent log dropouts.
+      // Use the shared fetchAdsb() helper so the DO and the browser proxy
+      // share the same timeout + error-handling path.
       const res = await fetchAdsb(this.env,
         `/v2/lat/${BBOX_CENTER.lat}/lon/${BBOX_CENTER.lon}/dist/${BBOX_RADIUS_NM}`);
       if (!res.ok) { console.warn(`feed not ok: ${res.status}`); return; }
