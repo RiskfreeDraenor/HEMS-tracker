@@ -2,8 +2,8 @@
 //  HEMS Tracker — Cloudflare Worker
 //
 //  Two responsibilities:
-//   1) /v2/*  → ADS-B feed for the browser. Tries adsb.lol first; falls back
-//               to adsbexchange (RapidAPI) when the ADSBX_API_KEY secret is set.
+//   1) /v2/*  → ADS-B feed for the browser. Tries adsbexchange (RapidAPI) when
+//               the ADSBX_API_KEY secret is set, with adsb.lol as fallback.
 //   2) TrackerDO Durable Object polls adsb.lol every 3s, runs a state
 //      machine on each fleet aircraft, and writes flight records to D1.
 //      Browser reads history through /log/* endpoints below.
@@ -22,7 +22,7 @@
 //    "* * * * *"  — heartbeat every minute
 //
 //  ENDPOINTS:
-//    /v2/*                       ADS-B feed (adsb.lol primary, adsbexchange fallback)
+//    /v2/*                       ADS-B feed (adsbexchange primary, adsb.lol fallback)
 //    /log/state                  current state of every fleet aircraft
 //    /log/flights?reg=…&limit=…  flight history (newest first)
 //    /log/flight/<id>/track      full track points for one flight
@@ -52,55 +52,60 @@ const AIRPORT_MAX_NM   = 2.5;       // closer than this counts as "at" the airpo
 const AIRPORT_BBOX_DEG = 0.05;      // pre-filter bbox (~3nm) before haversine sort
 
 // ============================================================================
-//  ADS-B feed with fallback (adsb.lol primary, adsbexchange via RapidAPI fallback)
+//  ADS-B feed with fallback (adsbexchange primary, adsb.lol fallback)
 // ============================================================================
-// adsb.lol is fast and free, but occasionally hiccups (502s, timeouts).
-// adsbexchange — when configured via the ADSBX_API_KEY wrangler secret —
-// gets hit only when adsb.lol fails or returns non-2xx, so we don't burn
-// the user's RapidAPI quota on routine calls. Both serve the same path
-// shape (`/v2/lat/.../lon/.../dist/...`, `/v2/reg/...`, etc.) and the
-// same JSON shape, so callers don't need to know which source answered.
-const ADSB_PRIMARY_HOST  = "api.adsb.lol";
-const ADSB_FALLBACK_HOST = "adsbexchange-com1.p.rapidapi.com";
-const ADSB_TIMEOUT_MS    = 6000;
+// adsbexchange (paid via RapidAPI) is the primary source — generally more
+// reliable + the user is paying for it. adsb.lol acts as a fallback when
+// adsbexchange returns non-2xx or times out (quota exhaustion, RapidAPI
+// hiccup, etc.) so we never go fully dark. If no ADSBX_API_KEY secret is
+// configured, adsb.lol just becomes the primary directly. Both endpoints
+// serve the same `/v2/...` path shape and the same JSON shape, so callers
+// don't need to know which source answered.
+const ADSBX_HOST       = "adsbexchange-com1.p.rapidapi.com";
+const ADSB_LOL_HOST    = "api.adsb.lol";
+const ADSB_TIMEOUT_MS  = 6000;
 async function fetchAdsb(env, path) {
-  // path looks like "/v2/lat/40.5/lon/-74.2/dist/150" — pass it through verbatim.
+  const hasKey = !!(env && env.ADSBX_API_KEY);
   let primaryErr = null;
-  try {
-    const ctrl = new AbortController();
-    const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
-    const res = await fetch(`https://${ADSB_PRIMARY_HOST}${path}`, {
-      headers: { "Accept": "application/json", "User-Agent": "hems-tracker/1.0" },
-      signal: ctrl.signal,
-    });
-    clearTimeout(t);
-    if (res.ok) return res;
-    primaryErr = new Error(`adsb.lol HTTP ${res.status}`);
-  } catch (e) {
-    primaryErr = e;
-  }
-  if (env && env.ADSBX_API_KEY) {
-    console.warn(`adsb.lol failed (${primaryErr && primaryErr.message || "unknown"}); trying adsbexchange`);
+
+  // Try adsbexchange first when configured
+  if (hasKey) {
     try {
       const ctrl = new AbortController();
       const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
-      const res = await fetch(`https://${ADSB_FALLBACK_HOST}${path}`, {
+      const res = await fetch(`https://${ADSBX_HOST}${path}`, {
         headers: {
           "X-RapidAPI-Key":  env.ADSBX_API_KEY,
-          "X-RapidAPI-Host": ADSB_FALLBACK_HOST,
+          "X-RapidAPI-Host": ADSBX_HOST,
           "Accept":          "application/json",
           "User-Agent":      "hems-tracker/1.0",
         },
         signal: ctrl.signal,
       });
       clearTimeout(t);
-      return res;
-    } catch (e2) {
-      console.error(`adsbexchange fallback also failed: ${e2 && e2.message || e2}`);
+      if (res.ok) return res;
+      primaryErr = new Error(`adsbexchange HTTP ${res.status}`);
+    } catch (e) {
+      primaryErr = e;
     }
+    if (primaryErr) console.warn(`adsbexchange failed (${primaryErr.message || "unknown"}); falling back to adsb.lol`);
   }
-  // Both failed (or no fallback configured) — return a synthetic 502 with the
-  // same shape the rest of the worker / DO expect.
+
+  // adsb.lol — fallback path (or primary if no key configured)
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
+    const res = await fetch(`https://${ADSB_LOL_HOST}${path}`, {
+      headers: { "Accept": "application/json", "User-Agent": "hems-tracker/1.0" },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    return res;
+  } catch (e2) {
+    console.error(`adsb.lol fallback also failed: ${e2 && e2.message || e2}`);
+  }
+  // Both failed — return a synthetic 502 with the same shape the rest of the
+  // worker / DO expect, so callers don't choke.
   return new Response(JSON.stringify({ ac: [], error: "all upstreams failed" }), {
     status: 502,
     headers: { "Content-Type": "application/json" },
@@ -135,7 +140,7 @@ export default {
     return new Response(
       "HEMS Tracker proxy + logger.\n" +
       "Endpoints:\n" +
-      "  /v2/*                      ADS-B feed (adsb.lol primary, adsbexchange fallback)\n" +
+      "  /v2/*                      ADS-B feed (adsbexchange primary, adsb.lol fallback)\n" +
       "  /log/state                 current fleet state\n" +
       "  /log/flights?reg=…         flight history\n" +
       "  /log/flight/<id>/track     track points\n" +
