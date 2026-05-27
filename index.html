@@ -178,9 +178,16 @@ const SETTINGS = {
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; height: 100%; background: var(--c-bg); color: var(--c-text); font-family: var(--f-mono); font-size: 13px; overflow: hidden; -webkit-font-smoothing: antialiased; }
+  /* Prevent accidental browser-level pinch-zoom on the chrome. Leaflet's map
+     container has its own touch handlers for actual map zoom, so disabling
+     gesture zoom on body has no effect on map interactions — it only stops the
+     entire page from zooming when the user pinches on the topbar or sidebar,
+     which on iOS Safari was pushing the topbar off the visual viewport and
+     forcing a refresh to recover. */
+  html, body { touch-action: manipulation; }
 
   #app { display: grid; grid-template-columns: 1fr 340px; grid-template-rows: 48px 1fr;
-         grid-template-areas: "topbar topbar" "map panel"; height: 100vh; width: 100vw; }
+         grid-template-areas: "topbar topbar" "map panel"; height: 100vh; height: 100dvh; width: 100vw; }
 
   #topbar { grid-area: topbar; display: flex; align-items: center; justify-content: space-between;
             padding: 0 18px; background: linear-gradient(180deg, var(--c-bg-2), var(--c-bg));
@@ -307,14 +314,14 @@ const SETTINGS = {
   /* Floating panel containers (share styling; positions differ) */
   #dev-panel, #options-panel, #traffic-panel {
     position: fixed; z-index: 1500;
-    width: 360px; max-height: calc(100vh - 80px);
+    width: 360px; max-height: calc(100vh - 80px); max-height: calc(100dvh - 80px);
     background: var(--c-bg-2); border: 1px solid var(--c-border-2);
     box-shadow: 0 8px 32px rgba(0,0,0,0.6);
     display: flex; flex-direction: column;
   }
   #dev-panel    { bottom: 36px; left: 16px; }
-  #options-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); }
-  #traffic-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); }
+  #options-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); max-height: calc(100dvh - 76px); }
+  #traffic-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); max-height: calc(100dvh - 76px); }
   #dev-panel.hidden, #options-panel.hidden, #traffic-panel.hidden { display: none; }
 
   /* ===== HISTORY overlay — full-viewport view with dedicated map + alt chart =====
@@ -909,7 +916,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0053</div>
+  <div id="version">v.0054</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
