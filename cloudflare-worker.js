@@ -2,7 +2,8 @@
 //  HEMS Tracker — Cloudflare Worker
 //
 //  Two responsibilities:
-//   1) /v2/*  → proxy adsb.lol for the browser (same as the original worker).
+//   1) /v2/*  → ADS-B feed for the browser. Tries adsb.lol first; falls back
+//               to adsbexchange (RapidAPI) when the ADSBX_API_KEY secret is set.
 //   2) TrackerDO Durable Object polls adsb.lol every 3s, runs a state
 //      machine on each fleet aircraft, and writes flight records to D1.
 //      Browser reads history through /log/* endpoints below.
@@ -21,7 +22,7 @@
 //    "* * * * *"  — heartbeat every minute
 //
 //  ENDPOINTS:
-//    /v2/*                       adsb.lol passthrough
+//    /v2/*                       ADS-B feed (adsb.lol primary, adsbexchange fallback)
 //    /log/state                  current state of every fleet aircraft
 //    /log/flights?reg=…&limit=…  flight history (newest first)
 //    /log/flight/<id>/track      full track points for one flight
@@ -51,6 +52,62 @@ const AIRPORT_MAX_NM   = 2.5;       // closer than this counts as "at" the airpo
 const AIRPORT_BBOX_DEG = 0.05;      // pre-filter bbox (~3nm) before haversine sort
 
 // ============================================================================
+//  ADS-B feed with fallback (adsb.lol primary, adsbexchange via RapidAPI fallback)
+// ============================================================================
+// adsb.lol is fast and free, but occasionally hiccups (502s, timeouts).
+// adsbexchange — when configured via the ADSBX_API_KEY wrangler secret —
+// gets hit only when adsb.lol fails or returns non-2xx, so we don't burn
+// the user's RapidAPI quota on routine calls. Both serve the same path
+// shape (`/v2/lat/.../lon/.../dist/...`, `/v2/reg/...`, etc.) and the
+// same JSON shape, so callers don't need to know which source answered.
+const ADSB_PRIMARY_HOST  = "api.adsb.lol";
+const ADSB_FALLBACK_HOST = "adsbexchange-com1.p.rapidapi.com";
+const ADSB_TIMEOUT_MS    = 6000;
+async function fetchAdsb(env, path) {
+  // path looks like "/v2/lat/40.5/lon/-74.2/dist/150" — pass it through verbatim.
+  let primaryErr = null;
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
+    const res = await fetch(`https://${ADSB_PRIMARY_HOST}${path}`, {
+      headers: { "Accept": "application/json", "User-Agent": "hems-tracker/1.0" },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (res.ok) return res;
+    primaryErr = new Error(`adsb.lol HTTP ${res.status}`);
+  } catch (e) {
+    primaryErr = e;
+  }
+  if (env && env.ADSBX_API_KEY) {
+    console.warn(`adsb.lol failed (${primaryErr && primaryErr.message || "unknown"}); trying adsbexchange`);
+    try {
+      const ctrl = new AbortController();
+      const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
+      const res = await fetch(`https://${ADSB_FALLBACK_HOST}${path}`, {
+        headers: {
+          "X-RapidAPI-Key":  env.ADSBX_API_KEY,
+          "X-RapidAPI-Host": ADSB_FALLBACK_HOST,
+          "Accept":          "application/json",
+          "User-Agent":      "hems-tracker/1.0",
+        },
+        signal: ctrl.signal,
+      });
+      clearTimeout(t);
+      return res;
+    } catch (e2) {
+      console.error(`adsbexchange fallback also failed: ${e2 && e2.message || e2}`);
+    }
+  }
+  // Both failed (or no fallback configured) — return a synthetic 502 with the
+  // same shape the rest of the worker / DO expect.
+  return new Response(JSON.stringify({ ac: [], error: "all upstreams failed" }), {
+    status: 502,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
+// ============================================================================
 //  Worker entry point
 // ============================================================================
 export default {
@@ -58,22 +115,15 @@ export default {
     const url = new URL(request.url);
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
 
-    // adsb.lol proxy
+    // ADS-B feed proxy — tries adsb.lol first, falls back to adsbexchange (RapidAPI)
+    // when the primary fails or times out. See fetchAdsb() above.
     if (url.pathname.startsWith("/v2/")) {
-      try {
-        const res = await fetch(`https://api.adsb.lol${url.pathname}${url.search}`, {
-          method:  "GET",
-          headers: { "Accept": "application/json", "User-Agent": "hems-tracker-proxy/1.0" },
-        });
-        const body = await res.text();
-        return new Response(body, {
-          status:  res.status,
-          headers: { ...corsHeaders(), "Content-Type": "application/json" },
-        });
-      } catch (e) {
-        return new Response(JSON.stringify({ error: "Upstream fetch failed", detail: String(e) }),
-          { status: 502, headers: { ...corsHeaders(), "Content-Type": "application/json" } });
-      }
+      const res  = await fetchAdsb(env, `${url.pathname}${url.search}`);
+      const body = await res.text();
+      return new Response(body, {
+        status:  res.status,
+        headers: { ...corsHeaders(), "Content-Type": "application/json" },
+      });
     }
 
     if (url.pathname.startsWith("/log/")) {
@@ -85,7 +135,7 @@ export default {
     return new Response(
       "HEMS Tracker proxy + logger.\n" +
       "Endpoints:\n" +
-      "  /v2/*                      adsb.lol passthrough\n" +
+      "  /v2/*                      ADS-B feed (adsb.lol primary, adsbexchange fallback)\n" +
       "  /log/state                 current fleet state\n" +
       "  /log/flights?reg=…         flight history\n" +
       "  /log/flight/<id>/track     track points\n" +
@@ -310,11 +360,12 @@ export class TrackerDO {
     try { await this.state.storage.setAlarm(Date.now() + POLL_INTERVAL_MS); } catch (e) { console.error("setAlarm:", e); }
 
     try {
-      const res = await fetch(
-        `https://api.adsb.lol/v2/lat/${BBOX_CENTER.lat}/lon/${BBOX_CENTER.lon}/dist/${BBOX_RADIUS_NM}`,
-        { headers: { "User-Agent": "hems-tracker-do/1.0", "Accept": "application/json" } }
-      );
-      if (!res.ok) { console.warn(`adsb.lol ${res.status}`); return; }
+      // Use the shared adsb.lol → adsbexchange fallback helper so the DO gets
+      // the same redundancy as the browser proxy. Spotty primary samples
+      // no longer cause silent log dropouts.
+      const res = await fetchAdsb(this.env,
+        `/v2/lat/${BBOX_CENTER.lat}/lon/${BBOX_CENTER.lon}/dist/${BBOX_RADIUS_NM}`);
+      if (!res.ok) { console.warn(`feed not ok: ${res.status}`); return; }
       const data  = await res.json();
       const byReg = Object.create(null);
       for (const ac of (data.ac || [])) {
