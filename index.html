@@ -897,7 +897,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0051</div>
+  <div id="version">v.0052</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1425,6 +1425,16 @@ const AircraftPhoto = (() => {
   const inflight = new Map();   // key → Promise
 
   const _key = (v) => String(v || "").toUpperCase().trim();
+  const _esc = (s) => String(s || "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  // Synchronous cache lookup. Returns the photo record if present + ok, else null.
+  // Used by renderPanel to embed the photo inline at card-build time (no flicker).
+  function getCached(opts) {
+    const k = _key(opts && (opts.hex || opts.reg));
+    if (!k) return null;
+    const r = cache.get(k);
+    return (r && r.status === "ok") ? r : null;
+  }
 
   async function fetchPhoto(opts) {
     const k = _key(opts.hex || opts.reg);
@@ -1476,6 +1486,7 @@ const AircraftPhoto = (() => {
   async function decorateCard(cardEl, opts) {
     try {
       if (!cardEl || cardEl.classList.contains("has-img")) return;   // manual image wins
+      if (cardEl.classList.contains("has-photo")) return;             // synchronously rendered already
       const result = await fetchPhoto(opts);
       if (!result || result.status !== "ok" || !result.thumb) return;
       // Cards re-render on every tick — bail if this element was already replaced.
@@ -1493,7 +1504,22 @@ const AircraftPhoto = (() => {
     } catch (_e) { /* swallow — never crash the host render */ }
   }
 
-  return { fetchPhoto, decorateCard };
+  // Inline-HTML helper for renderPanel: returns { cls, style, creditHtml } to embed
+  // synchronously into the card's HTML template when the cache is warm. Eliminates
+  // the per-tick "blink" that came from waiting for the async decorateCard to fire.
+  function inlineMarkup(opts) {
+    const cached = getCached(opts);
+    if (!cached || !cached.thumb) return { cls: "", style: "", creditHtml: "" };
+    return {
+      cls: " has-photo",
+      style: `; --ac-photo: url('${cached.thumb}')`,
+      creditHtml: cached.photographer
+        ? `<div class="fc-photo-credit">📷 ${_esc(cached.photographer)}</div>`
+        : "",
+    };
+  }
+
+  return { fetchPhoto, decorateCard, getCached, inlineMarkup };
 })();
 
 function renderPanel(primaryAc,trafficItems){
@@ -1510,9 +1536,19 @@ function renderPanel(primaryAc,trafficItems){
       const focusCls=state.focusedReg===cfg.registration?" focused":"";
       const imgCls = cfg.image ? " has-img" : "";
       const imgStyle = cfg.image ? `; --ac-bg: url('${cfg.image}')` : "";
-      if(!ac)return `<div class="fleet-card offline${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div></div>`;
+      // Synchronous auto-photo embed from the AircraftPhoto cache. If the photo
+      // isn't cached yet, decorateCard() will fetch + apply async (first load
+      // only — every subsequent re-render hits the cache and renders inline,
+      // so no flicker).
+      const photoOpts = cfg.image
+        ? null
+        : (ac && ac.hex && !/^(?:CACHED|BASE|SIM|TEST)_/.test(ac.hex))
+          ? { hex: ac.hex }
+          : { reg: cfg.registration };
+      const photo = photoOpts ? AircraftPhoto.inlineMarkup(photoOpts) : { cls:"", style:"", creditHtml:"" };
+      if(!ac)return `<div class="fleet-card offline${focusCls}${imgCls}${photo.cls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}${photo.style}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">OFFLINE</span></div><div class="fc-sub">Not Airborne · ${cfg.registration}</div>${photo.creditHtml}</div>`;
       const onGnd=isOnGround(ac);
-      return `<div class="fleet-card ${onGnd?"ground":"airborne"}${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div></div>`;
+      return `<div class="fleet-card ${onGnd?"ground":"airborne"}${focusCls}${imgCls}${photo.cls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}${photo.style}"><div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span><span class="fc-status">${onGnd?"ON GROUND":"AIRBORNE"}</span></div><div class="fc-grid"><div><span>ALT</span><b>${fmtAltitude(ac.alt_baro)}</b></div><div><span>SPD</span><b>${fmtSpeed(ac.gs)}</b></div><div><span>HDG</span><b>${fmtHeading(ac.track)}</b></div></div>${photo.creditHtml}</div>`;
     }).join("");
     sections.push(`<div class="company-group"><div class="company-header">${companyName}</div>${cards}</div>`);
   }
@@ -1698,10 +1734,16 @@ function renderHistoryFleetCards(){
       const focusCls = historyState.selectedReg === cfg.registration ? " focused" : "";
       const imgCls   = cfg.image ? " has-img" : "";
       const imgStyle = cfg.image ? `; --ac-bg: url('${cfg.image}')` : "";
+      // Sync auto-photo from cache — same trick as renderPanel to avoid flicker
+      // when the sidebar is re-rendered (e.g., when a different aircraft is selected).
+      const photo = cfg.image
+        ? { cls:"", style:"", creditHtml:"" }
+        : AircraftPhoto.inlineMarkup({ reg: cfg.registration });
       // Mini-card: no status row, no grid — just the label + reg.
-      return `<div class="fleet-card${focusCls}${imgCls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}">
+      return `<div class="fleet-card${focusCls}${imgCls}${photo.cls}" data-reg="${cfg.registration}" style="--ac-color:${cfg.color}${imgStyle}${photo.style}">
         <div class="fc-top"><span class="fc-dot"></span><span class="fc-label">${cfg.label}</span></div>
         <div class="fc-sub">${cfg.registration}</div>
+        ${photo.creditHtml}
       </div>`;
     }).join("");
     sections.push(`<div class="company-group"><div class="company-header">${companyName}</div>${cards}</div>`);
