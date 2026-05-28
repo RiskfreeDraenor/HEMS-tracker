@@ -90,6 +90,8 @@ export default {
     if (request.method === "OPTIONS") return new Response(null, { status: 204, headers: corsHeaders() });
 
     // adsb.lol proxy via the shared fetchAdsb() helper (6s timeout + safety 502).
+    // Kept as the gated fallback for browsers whose view falls outside the DO
+    // bbox. Default browser path is /live (DO snapshot) now — see below.
     if (url.pathname.startsWith("/v2/")) {
       const res  = await fetchAdsb(env, `${url.pathname}${url.search}`);
       const body = await res.text();
@@ -97,6 +99,15 @@ export default {
         status:  res.status,
         headers: { ...corsHeaders(), "Content-Type": "application/json" },
       });
+    }
+
+    // Shared live snapshot — routes to the DO singleton. The DO serves its
+    // last-known good poll without re-hitting adsb.lol, so N visitors poll
+    // /live every 3s but adsb.lol still only gets ONE call per 3s (the DO's).
+    if (url.pathname === "/live") {
+      const id   = env.TRACKER_DO.idFromName("singleton");
+      const stub = env.TRACKER_DO.get(id);
+      return stub.fetch(request);
     }
 
     if (url.pathname.startsWith("/log/")) {
@@ -108,7 +119,8 @@ export default {
     return new Response(
       "HEMS Tracker proxy + logger.\n" +
       "Endpoints:\n" +
-      "  /v2/*                      adsb.lol passthrough\n" +
+      "  /v2/*                      adsb.lol passthrough (gated browser fallback)\n" +
+      "  /live                      shared NJ-bbox snapshot (DO-served, default path)\n" +
       "  /log/state                 current fleet state\n" +
       "  /log/flights?reg=…         flight history\n" +
       "  /log/flight/<id>/track     track points\n" +
@@ -130,9 +142,20 @@ export default {
 // ============================================================================
 export class TrackerDO {
   constructor(state, env) {
-    this.state       = state;
-    this.env         = env;
-    this.initialized = false;
+    this.state        = state;
+    this.env          = env;
+    this.initialized  = false;
+    // Shared live snapshot — populated by alarm(), served by the /live route.
+    // Stored both in-memory (hot path) AND Durable Storage (cold-start
+    // resilience). Without storage persistence, a worker re-deploy or DO
+    // eviction would briefly dump every connected visitor onto the gated
+    // direct adsb.lol fallback while we wait for the next alarm.
+    this.snapshot     = null;   // { ts, bbox: {lat,lon,radius}, ac: [...] }
+    this.backoffUntil = 0;      // ms epoch; skip upstream poll until past this
+    this.state.blockConcurrencyWhile(async () => {
+      this.snapshot     = (await this.state.storage.get("snapshot"))     || null;
+      this.backoffUntil = (await this.state.storage.get("backoffUntil")) || 0;
+    });
   }
 
   async ensureInitialized() {
@@ -224,7 +247,30 @@ export class TrackerDO {
     await this.ensureAlarm();
 
     const url   = new URL(request.url);
-    const jhdrs = { ...corsHeaders(), "Content-Type": "application/json" };
+    const jhdrs = { ...corsHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store" };
+
+    // Shared live snapshot — served from the DO's in-memory + Durable Storage
+    // copy of the most recent successful upstream poll. Every browser hits
+    // this instead of /v2/lat/.../, so adsb.lol sees ONE call per 3s
+    // regardless of visitor count. envelope includes ageMs / stale /
+    // backoffUntil so the UI can show a "data delayed" state during a 429.
+    if (url.pathname === "/live") {
+      if (!this.snapshot) {
+        return new Response(JSON.stringify({
+          ac: [], stale: true, noData: true,
+          backoffUntil: this.backoffUntil || null,
+        }), { status: 503, headers: jhdrs });
+      }
+      const ageMs = Date.now() - this.snapshot.ts;
+      return new Response(JSON.stringify({
+        ts:           this.snapshot.ts,
+        ageMs,
+        stale:        ageMs > 15000,            // ~5 missed ticks
+        bbox:         this.snapshot.bbox,       // matches BBOX_CENTER + BBOX_RADIUS_NM
+        ac:           this.snapshot.ac,
+        backoffUntil: this.backoffUntil || null,
+      }), { headers: jhdrs });
+    }
 
     if (url.pathname === "/log/state") {
       const rs = await this.env.DB.prepare(`SELECT * FROM aircraft_state`).all();
@@ -332,13 +378,60 @@ export class TrackerDO {
     await this.ensureInitialized();
     try { await this.state.storage.setAlarm(Date.now() + POLL_INTERVAL_MS); } catch (e) { console.error("setAlarm:", e); }
 
+    // Honor a previous 429 backoff — skip the upstream call entirely.
+    // /live keeps serving the last good snapshot to browsers with stale=true
+    // and backoffUntil set, so the UI can show a "delayed" state instead of
+    // frozen positions that look live.
+    if (this.backoffUntil && Date.now() < this.backoffUntil) {
+      return;
+    }
+
     try {
-      // Use the shared fetchAdsb() helper so the DO and the browser proxy
-      // share the same timeout + error-handling path.
       const res = await fetchAdsb(this.env,
         `/v2/lat/${BBOX_CENTER.lat}/lon/${BBOX_CENTER.lon}/dist/${BBOX_RADIUS_NM}`);
+
+      // Upstream rate-limit handling — read Retry-After (numeric seconds OR
+      // HTTP-date), set backoffUntil, skip processing. Defaults to 30s when
+      // no header is provided. Capped at 5 minutes so a bad header can't
+      // strand us silently for hours.
+      if (res.status === 429) {
+        const ra = res.headers.get("Retry-After");
+        let backoffMs = 30000;
+        if (ra) {
+          const sec = parseInt(ra, 10);
+          if (Number.isFinite(sec) && sec > 0) {
+            backoffMs = Math.min(sec * 1000, 300000);
+          } else {
+            const t = Date.parse(ra);
+            if (Number.isFinite(t)) backoffMs = Math.max(1000, Math.min(t - Date.now(), 300000));
+          }
+        }
+        this.backoffUntil = Date.now() + backoffMs;
+        await this.state.storage.put("backoffUntil", this.backoffUntil);
+        console.warn(`adsb.lol 429 — backing off ${backoffMs}ms`);
+        return;
+      }
       if (!res.ok) { console.warn(`feed not ok: ${res.status}`); return; }
-      const data  = await res.json();
+
+      const data = await res.json();
+
+      // Store the snapshot in BOTH places: in-memory for instant /live reads,
+      // Durable Storage for cold-start / re-deploy resilience. Single key,
+      // overwrite — never appends, so this doesn't accumulate.
+      this.snapshot = {
+        ts:   Date.now(),
+        bbox: { lat: BBOX_CENTER.lat, lon: BBOX_CENTER.lon, radius: BBOX_RADIUS_NM },
+        ac:   data.ac || [],
+      };
+      await this.state.storage.put("snapshot", this.snapshot);
+
+      // Clear any prior backoff state on a successful poll.
+      if (this.backoffUntil) {
+        this.backoffUntil = 0;
+        await this.state.storage.put("backoffUntil", 0);
+      }
+
+      // Existing flight-state processing — unchanged.
       const byReg = Object.create(null);
       for (const ac of (data.ac || [])) {
         if (ac.r) byReg[ac.r.toUpperCase()] = ac;

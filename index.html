@@ -201,6 +201,7 @@ const SETTINGS = {
   .status-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--c-dim); }
   .status-dot.ok { background: var(--c-ok); box-shadow: 0 0 8px var(--c-ok); animation: pulse-ok 2s ease-in-out infinite; }
   .status-dot.err { background: var(--c-warn); box-shadow: 0 0 8px var(--c-warn); }
+  .status-dot.warn { background: var(--c-fleet); box-shadow: 0 0 8px var(--c-fleet); animation: pulse-ok 1.2s ease-in-out infinite; }
   @keyframes pulse-ok { 0%,100% { opacity: 1; } 50% { opacity: .45; } }
 
   #map { grid-area: map; background: var(--c-bg); outline: none; }
@@ -916,7 +917,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0058</div>
+  <div id="version">v.0059</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -940,14 +941,33 @@ const Api=(()=>{
   const workerBase = (typeof WORKER_URL==="string" && WORKER_URL.trim())
     ? WORKER_URL.trim().replace(/\/+$/,"") + "/v2"
     : null;
+  // New default browser path — points at the worker's /live route which serves
+  // the DO's shared NJ-bbox snapshot. ONE upstream adsb.lol call per 3s
+  // regardless of visitor count.
+  const workerLiveUrl = (typeof WORKER_URL==="string" && WORKER_URL.trim())
+    ? WORKER_URL.trim().replace(/\/+$/,"") + "/live"
+    : null;
+  // Mirrors the worker's BBOX_CENTER + BBOX_RADIUS_NM. If the visitor's view
+  // (focus + requested radius) falls inside this circle, /live covers them.
+  // If they pan outside (e.g. Boston, Atlanta), live() falls through to the
+  // gated direct adsb.lol call.
+  const NJ_DO_BBOX = { lat: 40.6, lon: -74.3, radius: 150 };   // nm
 
-  // Strategies tried in order on EVERY call (no sticky caching). The worker should
-  // almost always succeed; the others are last-resort fallbacks if the worker
-  // briefly hiccups or isn't configured.
+  // Public CORS proxy as a last-ditch fallback. Off by default — was a
+  // rate-limit risk for the proxy itself if the worker degraded. Flip to
+  // true only if there's a known worker outage you can't reach.
+  const ENABLE_PUBLIC_PROXY_FALLBACK = false;
+
+  // Strategies tried in order on EVERY call to the legacy /v2/* path
+  // (Api.trafficNear / Api.byRegistration). The default browser path is
+  // Api.live() — see below — which prefers /live and only enters this chain
+  // as a gated fallback.
   const STRATEGIES = [
-    ...(workerBase ? [{ name:"worker",     url: p => workerBase + p }] : []),
-    { name:"direct",     url: p => directBase + p },
-    { name:"allorigins", url: p => `https://api.allorigins.win/raw?url=${encodeURIComponent(directBase + p)}` },
+    ...(workerBase ? [{ name:"worker", url: p => workerBase + p }] : []),
+    { name:"direct", url: p => directBase + p },
+    ...(ENABLE_PUBLIC_PROXY_FALLBACK
+      ? [{ name:"allorigins", url: p => `https://api.allorigins.win/raw?url=${encodeURIComponent(directBase + p)}` }]
+      : []),
   ];
 
   const FETCH_TIMEOUT_MS = 8000;   // give up on a strategy after 8s and fall through to the next
@@ -978,11 +998,41 @@ const Api=(()=>{
 
   async function trafficNear(lat,lon,dN){const d=Math.max(1,Math.min(250,Math.round(dN)));const data=await _get(`/lat/${lat.toFixed(5)}/lon/${lon.toFixed(5)}/dist/${d}`);return data?.ac??[];}
   async function byRegistration(reg){const data=await _get(`/reg/${encodeURIComponent(reg.toUpperCase())}`);const list=data?.ac??[];return list[0]??null;}
-  return {trafficNear,byRegistration};
+
+  // Preferred browser path. Returns an envelope: { ac, stale, backoffUntil,
+  // ageMs, fromFallback }. tick() reads the envelope into state so the UI
+  // can show "DELAYED" / "BACKOFF" instead of pretending stale data is live.
+  async function live(focus, requestedRadius) {
+    const distFromCenter = distanceNm(NJ_DO_BBOX.lat, NJ_DO_BBOX.lon, focus.lat, focus.lon);
+    const contained = (distFromCenter + requestedRadius) <= NJ_DO_BBOX.radius;
+    if (workerLiveUrl && contained) {
+      try {
+        const data = await _fetchJson(workerLiveUrl);
+        if (data && Array.isArray(data.ac) && !data.noData) {
+          return {
+            ac:           data.ac,
+            stale:        !!data.stale,
+            backoffUntil: data.backoffUntil || null,
+            ageMs:        data.ageMs || 0,
+            fromFallback: false,
+          };
+        }
+      } catch (_e) { /* fall through to gated direct adsb.lol */ }
+    }
+    // Gated direct adsb.lol fallback — only when outside the NJ bbox OR /live
+    // returned no usable data. This is the rare path; in normal use /live wins.
+    const ac = await trafficNear(focus.lat, focus.lon, requestedRadius);
+    return { ac, stale: false, backoffUntil: null, ageMs: 0, fromFallback: true };
+  }
+
+  return {trafficNear, byRegistration, live};
 })();
 
 /* ---------- main app ---------- */
 const state={radiusNm:SETTINGS.defaultRadiusNm,maxAltFt:SETTINGS.defaultMaxAltFt,fleet:{},traffic:[],fleetHexes:new Set(),trails:new Map(),lastUpdate:null,lastError:null,selectedHex:null,paused:false,consecutiveFails:0,
+  // Live-feed envelope fields populated by tick() from /live response.
+  // Drive the "DELAYED" / "BACKOFF" UI states (see status-dot block in renderPanel).
+  feedStale:false,feedBackoffUntil:null,feedAgeMs:0,
   sim:{enabled:false,primary:{lat:BASE_LOCATION.lat,lon:BASE_LOCATION.lon,alt:1500,heading:90,speed:100,autoFly:false},traffic:[]}};
 const primary=FLEET.find(a=>a.isPrimary)??FLEET[0];
 state.focusedReg=primary.registration;   // which aircraft drives rings / clock / altitude features; changed by clicking a card
@@ -1666,13 +1716,23 @@ function renderPanel(primaryAc,trafficItems){
 
   const ts=state.lastUpdate?new Date(state.lastUpdate).toLocaleTimeString("en-US",{hour12:false}):"—";
   document.getElementById("last-update").textContent=ts;
-  // Status: ERR > LIVE > CONNECTING. We're only "LIVE" after at least one
-  // successful poll has landed; before that the dot stays neutral.
-  const sd = document.getElementById("status-dot");
+  // Status priority: ERR > BACKOFF > DELAYED > LIVE > CONNECTING.
+  // BACKOFF / DELAYED come from the /live envelope (DO is in 429 backoff or
+  // serving stale snapshot) — show as amber so frozen positions don't look
+  // live to the user.
+  const sd  = document.getElementById("status-dot");
   const stx = document.getElementById("status-text");
   if (state.lastError) {
     sd.className = "status-dot err";
     stx.textContent = `ERR: ${state.lastError}`;
+  } else if (state.feedBackoffUntil && Date.now() < state.feedBackoffUntil) {
+    const sec = Math.ceil((state.feedBackoffUntil - Date.now()) / 1000);
+    sd.className = "status-dot warn";
+    stx.textContent = `BACKOFF ${sec}s — DATA DELAYED`;
+  } else if (state.feedStale) {
+    const ageS = Math.round((state.feedAgeMs || 0) / 1000);
+    sd.className = "status-dot warn";
+    stx.textContent = `DELAYED (${ageS}s)`;
   } else if (state.lastUpdate) {
     sd.className = "status-dot ok";
     stx.textContent = "LIVE";
@@ -2212,7 +2272,14 @@ async function tick(){
         bboxRadius = Math.max(bboxRadius, distanceNm(focus.lat, focus.lon, here.lat, here.lon) + 8);
       }
     }
-    const allAc = await Api.trafficNear(focus.lat, focus.lon, bboxRadius);
+    // Default browser path is /live (DO snapshot — one upstream call per 3s
+    // regardless of visitor count). live() falls through to a direct adsb.lol
+    // call only when the view extends outside the DO's NJ bbox.
+    const liveData = await Api.live(focus, bboxRadius);
+    const allAc = liveData.ac;
+    state.feedStale         = liveData.stale;
+    state.feedBackoffUntil  = liveData.backoffUntil;
+    state.feedAgeMs         = liveData.ageMs;
 
     // Split response: fleet (by registration, case-insensitive) + everything else.
     const fleetRegs = new Set(FLEET.map(c => c.registration.toUpperCase()));
