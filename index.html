@@ -225,6 +225,12 @@ const SETTINGS = {
   .fleet-card { background: var(--c-surface); border: 1px solid var(--c-border); border-left: 3px solid var(--ac-color, var(--c-fleet)); padding: 10px 12px; margin-bottom: 8px; position: relative; cursor: pointer; transition: background .12s ease; }
   .fleet-card:hover { background: var(--c-surface-2); }
   .fleet-card.focused { background: var(--c-surface-2); box-shadow: inset 0 0 0 1px var(--ac-color, var(--c-fleet)); }
+  /* Uniform card height in the right panel regardless of live state: a live
+     aircraft renders the 2-row ALT/SPD/HDG .fc-grid (~76px) while an offline
+     one renders a single .fc-sub line (~61px). Floor every card to the grid
+     height so the parked/offline cards don't look shorter. Scoped to
+     #fleet-panel — the HISTORY overlay picker cards are already uniform. */
+  #fleet-panel .fleet-card { min-height: 76px; }
   /* Optional per-aircraft photo behind the card. The dark gradient on top keeps
      the text legible against any image. Set via the inline --ac-bg variable. */
   .fleet-card.has-img {
@@ -917,7 +923,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0063</div>
+  <div id="version">v.0064</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
