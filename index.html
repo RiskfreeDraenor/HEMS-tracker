@@ -320,7 +320,7 @@ const SETTINGS = {
   .topbar-right { display: flex; align-items: center; gap: 8px; }
 
   /* Floating panel containers (share styling; positions differ) */
-  #dev-panel, #options-panel, #traffic-panel {
+  #dev-panel, #options-panel, #traffic-panel, #weather-panel {
     position: fixed; z-index: 1500;
     width: 360px; max-height: calc(100vh - 80px); max-height: calc(100dvh - 80px);
     background: var(--c-bg-2); border: 1px solid var(--c-border-2);
@@ -330,7 +330,8 @@ const SETTINGS = {
   #dev-panel    { bottom: 36px; left: 16px; }
   #options-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); max-height: calc(100dvh - 76px); }
   #traffic-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); max-height: calc(100dvh - 76px); }
-  #dev-panel.hidden, #options-panel.hidden, #traffic-panel.hidden { display: none; }
+  #weather-panel{ top: 56px; right: 16px; max-height: calc(100vh - 76px); max-height: calc(100dvh - 76px); }
+  #dev-panel.hidden, #options-panel.hidden, #traffic-panel.hidden, #weather-panel.hidden { display: none; }
 
   /* ===== HISTORY overlay — full-viewport view with dedicated map + alt chart =====
      3-column layout: flights list LEFT (full height) | stats+map+alt chart CENTER
@@ -439,18 +440,6 @@ const SETTINGS = {
   }
   #history-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
 
-  /* RADAR toggle button in the topbar — same shape as OPTIONS/HISTORY, plus a lit
-     "active" state since it's a stateful on/off toggle (not a panel opener). */
-  #radar-open-btn {
-    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
-    font-family: var(--f-mono); font-size: 10px; letter-spacing: .2em; font-weight: 600;
-    padding: 6px 12px; cursor: pointer; transition: all .15s ease;
-    display: inline-flex; align-items: center; gap: 6px; line-height: 1;
-  }
-  #radar-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-radar); color: var(--c-radar); }
-  #radar-open-btn.active { background: var(--c-radar); border-color: var(--c-radar); color: #04121f; }
-  .drawer-actions button#drawer-radar-btn.active { border-color: var(--c-radar); color: var(--c-radar); }
-
   /* RADAR animation control bar — bottom-center floating bar, below panels/drawer. */
   #radar-bar {
     position: fixed; z-index: 1300; bottom: 14px; left: 50%; transform: translateX(-50%);
@@ -468,6 +457,35 @@ const SETTINGS = {
   #radar-play-btn:hover { background: var(--c-surface-2); border-color: var(--c-radar); }
   #radar-scrub { flex: 1 1 auto; }
   #radar-time { flex: 0 0 auto; min-width: 58px; text-align: right; font-size: 10px; letter-spacing: .1em; color: var(--c-muted); }
+
+  /* WEATHER button — same shape as the other topbar buttons; lit when an on-map weather layer is active. */
+  #weather-open-btn {
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: .2em; font-weight: 600;
+    padding: 6px 12px; cursor: pointer; transition: all .15s ease;
+    display: inline-flex; align-items: center; gap: 6px; line-height: 1;
+  }
+  #weather-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-radar); color: var(--c-radar); }
+  #weather-open-btn.active { background: var(--c-radar); border-color: var(--c-radar); color: #04121f; }
+
+  /* WEATHER panel rows — one toggle per weather service. */
+  .wx-group-label { font-size: 10px; font-weight: 600; letter-spacing: .25em; color: var(--c-muted); text-transform: uppercase; margin-bottom: 6px; }
+  .wx-row { display: flex; align-items: center; justify-content: space-between; padding: 5px 0; }
+  .wx-name { font-size: 12px; letter-spacing: .06em; color: var(--c-text); }
+  .wx-toggle {
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-muted);
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; font-weight: 600;
+    padding: 4px 14px; min-width: 54px; cursor: pointer; transition: all .15s ease;
+  }
+  .wx-toggle:hover { border-color: var(--c-radar); color: var(--c-radar); }
+  .wx-toggle.on { background: var(--c-radar); border-color: var(--c-radar); color: #04121f; }
+  .wx-note { font-size: 10px; color: var(--c-muted); font-style: italic; margin-top: 10px; line-height: 1.45; }
+
+  /* WIND full-screen view — embedded Windy/Ventusky. Reuses the HISTORY overlay chrome. */
+  #wind-overlay { position: fixed; inset: 0; z-index: 2000; background: var(--c-bg); display: flex; flex-direction: column; }
+  #wind-overlay.hidden { display: none; }
+  #wind-overlay .ov-bar { height: 48px; flex: 0 0 48px; }
+  #wind-frame { flex: 1 1 auto; width: 100%; border: 0; display: block; background: var(--c-bg); }
 
   /* Shared bar / body / close-btn for all floating panels */
   .dev-bar, .float-bar {
@@ -520,7 +538,7 @@ const SETTINGS = {
     white-space: pre-wrap; line-height: 1.5; user-select: all;
   }
   @media (max-width: 800px) {
-    #dev-panel, #options-panel, #traffic-panel {
+    #dev-panel, #options-panel, #traffic-panel, #weather-panel {
       width: calc(100vw - 32px); right: 16px; left: 16px;
     }
     /* HISTORY overlay stacks vertically on phones: bar → fleet picker (compact)
@@ -778,7 +796,7 @@ const SETTINGS = {
       <div class="topbar-right">
         <button id="options-open-btn"><span class="btn-icon">⚙</span><span class="btn-text">OPTIONS</span></button>
         <button id="history-open-btn"><span class="btn-icon">📋</span><span class="btn-text">HISTORY</span></button>
-        <button id="radar-open-btn"><span class="btn-icon">🌧</span><span class="btn-text">RADAR</span></button>
+        <button id="weather-open-btn"><span class="btn-icon">⛅</span><span class="btn-text">WEATHER</span></button>
         <button id="traffic-open-btn"><span class="btn-icon">📡</span><span class="btn-text">TRAFFIC</span><span class="traffic-count" id="traffic-count-btn">0</span></button>
       </div>
     </header>
@@ -791,7 +809,7 @@ const SETTINGS = {
       <div class="drawer-actions">
         <button id="drawer-options-btn"><span class="icon">⚙</span><span>OPTIONS</span></button>
         <button id="drawer-history-btn"><span class="icon">📋</span><span>HISTORY</span></button>
-        <button id="drawer-radar-btn"><span class="icon">🌧</span><span>RADAR</span></button>
+        <button id="drawer-weather-btn"><span class="icon">⛅</span><span>WEATHER</span></button>
         <button id="drawer-traffic-btn"><span class="icon">📡</span><span>TRAFFIC</span><span class="count traffic-count" id="drawer-traffic-count">0</span></button>
       </div>
 
@@ -846,11 +864,6 @@ const SETTINGS = {
       <label class="airports-labels-toggle">
         <input type="checkbox" id="airports-labels-check" /> SHOW NAMES
       </label>
-      <div class="radius-row" style="margin-top:10px;">
-        <label for="radar-opacity-slider">RADAR OPACITY</label>
-        <span id="radar-opacity-readout">65%</span>
-      </div>
-      <input type="range" id="radar-opacity-slider" min="10" max="100" value="65" step="5" />
     </div>
   </div>
 
@@ -865,12 +878,53 @@ const SETTINGS = {
     </div>
   </div>
 
+  <!-- WEATHER floating panel — one toggle per weather layer/service. Radar
+       overlays the tracker map; Windy/Ventusky open a full-screen view. Built
+       to grow (METAR/TAF planned). -->
+  <div id="weather-panel" class="hidden">
+    <div class="float-bar">
+      <span class="float-title">⛅ WEATHER</span>
+      <button class="float-close-btn" data-target="weather-panel" title="Close">×</button>
+    </div>
+    <div class="float-body">
+      <div class="wx-group-label">ON THE MAP</div>
+      <div class="wx-row">
+        <span class="wx-name">🌧 Radar</span>
+        <button class="wx-toggle" id="wx-radar-toggle" aria-pressed="false">OFF</button>
+      </div>
+      <div class="radius-row" style="margin-top:8px;">
+        <label for="radar-opacity-slider">RADAR OPACITY</label>
+        <span id="radar-opacity-readout">65%</span>
+      </div>
+      <input type="range" id="radar-opacity-slider" min="10" max="100" value="65" step="5" />
+      <div class="wx-group-label" style="margin-top:14px;">FULL-SCREEN VIEW</div>
+      <div class="wx-row">
+        <span class="wx-name">💨 Windy</span>
+        <button class="wx-toggle" id="wx-windy-toggle" aria-pressed="false">OFF</button>
+      </div>
+      <div class="wx-row" style="margin-top:6px;">
+        <span class="wx-name">💨 Ventusky</span>
+        <button class="wx-toggle" id="wx-ventusky-toggle" aria-pressed="false">OFF</button>
+      </div>
+      <div class="wx-note">Windy / Ventusky open a full-screen planning map (winds, gusts, forecast). More layers (METAR/TAF) coming.</div>
+    </div>
+  </div>
+
   <!-- RADAR animation control — visible only while the radar overlay is on.
        Bottom-center: play/pause, frame scrubber, and the frame's age readout. -->
   <div id="radar-bar" class="hidden">
     <button id="radar-play-btn" title="Play / pause">❚❚</button>
     <input type="range" id="radar-scrub" min="0" max="0" value="0" step="1" />
     <span id="radar-time">—</span>
+  </div>
+
+  <!-- WIND full-screen view — embedded Windy / Ventusky (lazy-loaded). ✕ / ESC closes. -->
+  <div id="wind-overlay" class="hidden">
+    <header class="ov-bar">
+      <span class="ov-title"><span class="mark">💨</span><span id="wind-title">WIND</span></span>
+      <button class="ov-close-btn" id="wind-close-btn" title="Close">✕</button>
+    </header>
+    <iframe id="wind-frame" title="Wind map" src="" allow="fullscreen"></iframe>
   </div>
 
   <!-- HISTORY full-viewport overlay — opened from the topbar HISTORY button or any
@@ -969,7 +1023,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0067</div>
+  <div id="version">v.0068</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1805,7 +1859,7 @@ function renderPanel(primaryAc,trafficItems){
 
 /* ---------- Floating-panel mutex (OPTIONS / TRAFFIC share one screen slot) ----------
    HISTORY is no longer in this group — it's a full-viewport overlay (see below). */
-const TOP_RIGHT_PANELS = ["options-panel", "traffic-panel"];
+const TOP_RIGHT_PANELS = ["options-panel", "traffic-panel", "weather-panel"];
 function openPanel(id){
   for (const pid of TOP_RIGHT_PANELS) {
     const p = document.getElementById(pid);
@@ -1921,8 +1975,8 @@ const Radar = (() => {
   async function enable(){
     if (st.on) return;
     st.on = true;
-    if ($("radar-open-btn"))   $("radar-open-btn").classList.add("active");
-    if ($("drawer-radar-btn")) $("drawer-radar-btn").classList.add("active");
+    if ($("wx-radar-toggle"))  { const t=$("wx-radar-toggle"); t.textContent="ON"; t.classList.add("on"); t.setAttribute("aria-pressed","true"); }
+    if ($("weather-open-btn")) $("weather-open-btn").classList.add("active");
     if ($("radar-bar"))        $("radar-bar").classList.remove("hidden");
     await loadFrames(false);
     if (!st.on) return;        // toggled back off during the fetch — disable() already cleaned up
@@ -1935,8 +1989,8 @@ const Radar = (() => {
   }
   function disable(){
     st.on = false;
-    if ($("radar-open-btn"))   $("radar-open-btn").classList.remove("active");
-    if ($("drawer-radar-btn")) $("drawer-radar-btn").classList.remove("active");
+    if ($("wx-radar-toggle"))  { const t=$("wx-radar-toggle"); t.textContent="OFF"; t.classList.remove("on"); t.setAttribute("aria-pressed","false"); }
+    if ($("weather-open-btn")) $("weather-open-btn").classList.remove("active");
     if ($("radar-bar"))        $("radar-bar").classList.add("hidden");
     clearTimeout(st.animTimer); clearInterval(st.refreshTimer);
     try { map.attributionControl.removeAttribution(ATTR); } catch(e){}
@@ -1948,6 +2002,47 @@ const Radar = (() => {
     onScrub(i){ pause(); showFrame(Number(i)); },
     setOpacity(v){ st.opacity = Math.max(0, Math.min(1, v)); if (st.on) showFrame(st.idx); }
   };
+})();
+
+/* ==================================================================
+   WIND VIEW — full-screen embedded Windy / Ventusky planning maps.
+   Each is its own WEATHER-panel toggle. They open the shared #wind-overlay
+   (a separate full-screen view, not a map layer — Windy/Ventusky have no free
+   on-map wind tiles). The iframe src is set lazily on open and cleared on
+   close so the embed stops running when hidden. NJ-centered, winds in knots.
+   ================================================================== */
+const WindView = (() => {
+  const URLS = {
+    windy: "https://embed.windy.com/embed2.html?lat=40.6&lon=-74.3&detailLat=40.6&detailLon=-74.3&zoom=7&level=surface&overlay=wind&product=ecmwf&menu=&type=map&location=coordinates&metricWind=kt&metricTemp=%C2%B0F&calendar=now",
+    ventusky: "https://embed.ventusky.com/?p=40.6;-74.3;7&l=wind-10m"
+  };
+  const NAMES = { windy: "Windy", ventusky: "Ventusky" };
+  let current = null;
+  const $ = (id) => document.getElementById(id);
+  function setToggle(svc, on){
+    const b = $("wx-" + svc + "-toggle");
+    if (!b) return;
+    b.textContent = on ? "ON" : "OFF";
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-pressed", on ? "true" : "false");
+  }
+  function open(svc){
+    if (!URLS[svc]) return;
+    $("wind-frame").src = URLS[svc];
+    $("wind-title").textContent = "WIND — " + NAMES[svc];
+    $("wind-overlay").classList.remove("hidden");
+    setToggle("windy", svc === "windy");
+    setToggle("ventusky", svc === "ventusky");
+    current = svc;
+  }
+  function close(){
+    $("wind-overlay").classList.add("hidden");
+    $("wind-frame").src = "";            // stop the embed while hidden
+    setToggle("windy", false);
+    setToggle("ventusky", false);
+    current = null;
+  }
+  return { open, close, toggle(svc){ current === svc ? close() : open(svc); } };
 })();
 
 /* ---------- Worker fetch helpers ---------- */
@@ -2550,8 +2645,9 @@ function initUI(){
     btn.addEventListener("click", () => closePanel(btn.dataset.target));
   });
 
-  // ===== RADAR — stateful on/off toggle (not a panel) + its animation controls =====
-  document.getElementById("radar-open-btn").addEventListener("click", () => Radar.toggle());
+  // ===== WEATHER panel — radar overlay (on-map) + Windy/Ventusky full-screen views =====
+  document.getElementById("weather-open-btn").addEventListener("click", () => togglePanel("weather-panel"));
+  document.getElementById("wx-radar-toggle").addEventListener("click", () => Radar.toggle());
   document.getElementById("radar-play-btn").addEventListener("click", () => Radar.togglePlay());
   document.getElementById("radar-scrub").addEventListener("input", (e) => Radar.onScrub(e.target.value));
   document.getElementById("radar-opacity-slider").addEventListener("input", (e) => {
@@ -2559,6 +2655,9 @@ function initUI(){
     Radar.setOpacity(v / 100);
     document.getElementById("radar-opacity-readout").textContent = v + "%";
   });
+  document.getElementById("wx-windy-toggle").addEventListener("click", () => WindView.toggle("windy"));
+  document.getElementById("wx-ventusky-toggle").addEventListener("click", () => WindView.toggle("ventusky"));
+  document.getElementById("wind-close-btn").addEventListener("click", () => WindView.close());
 
   // ===== HISTORY overlay — topbar trigger + close button. ESC also closes it. =====
   document.getElementById("history-open-btn").addEventListener("click", () => openHistoryOverlay());
@@ -2567,6 +2666,8 @@ function initUI(){
     if (e.key === "Escape") {
       const ov = document.getElementById("history-overlay");
       if (ov && !ov.classList.contains("hidden")) closeHistoryOverlay();
+      const wov = document.getElementById("wind-overlay");
+      if (wov && !wov.classList.contains("hidden")) WindView.close();
     }
   });
 
@@ -2593,8 +2694,8 @@ function initUI(){
   document.getElementById("drawer-history-btn").addEventListener("click", () => {
     closeDrawer(); openHistoryOverlay();
   });
-  document.getElementById("drawer-radar-btn").addEventListener("click", () => {
-    closeDrawer(); Radar.toggle();
+  document.getElementById("drawer-weather-btn").addEventListener("click", () => {
+    closeDrawer(); togglePanel("weather-panel");
   });
 
   // ===== ICON TESTER =====
