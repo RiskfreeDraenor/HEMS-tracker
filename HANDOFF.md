@@ -1,15 +1,28 @@
-# HEMS Tracker — Handoff v.2 for the next session
+# HEMS Tracker — Handoff v.3 for the next session
 
 This document brings a fresh Claude Code session up to speed quickly. Read it
-end-to-end before making changes. Memory files in `~/.claude/projects/.../memory/`
-also auto-load and reinforce the conventions below.
+end-to-end before making changes. The companion `CLAUDE.md` is the tight
+architectural quick-reference focused on the data-fetch path; this file is
+the broad onboarding. Memory files in `~/.claude/projects/.../memory/` also
+auto-load and reinforce the conventions below.
 
-> **What changed since v.1 (was v.0039):** 5 more aircraft (now 8 total across
-> 5 companies), a smooth-tracking pipeline (bbox poll + outlier filter +
-> dead-reckoning), a full-viewport HISTORY overlay with dedicated map +
-> altitude chart, automatic aircraft photos via the Planespotters API, a
-> ground-up mobile rework with a side drawer + hamburger, and a handful of
-> iOS quirks fixed. **Current live version: v.0058.**
+> **What changed since v.2 (was v.0058):**
+> - **v.0059 — Shared live snapshot.** Browsers no longer hit adsb.lol
+>   directly every 3 s. They now poll the worker's `/live` route, which
+>   serves the DO's already-existing bbox poll. Upstream call rate is now
+>   flat at 1 per 3 s regardless of visitor count. Snapshot persists to
+>   Durable Storage for cold-start resilience. 429 handling honors
+>   `Retry-After`. UI surfaces stale / backoff via an amber status dot.
+> - **v.0060 → v.0061 — Multi-source ADS-B merge.** The DO now polls
+>   adsb.lol + airplanes.live in parallel each cycle (initially also
+>   adsb.fi — pulled after we confirmed an IP/ASN block on Cloudflare
+>   Worker egress). Merge dedupes by lowercased hex, freshest `seen` wins
+>   position, missing fields backfill from the other sources. Server-side
+>   outlier filter on `distance_nm` accumulation mirrors the browser's
+>   ingestFleetSample logic. Per-source backoff so one source 429'ing
+>   doesn't blank the others. `/live` envelope adds per-source health.
+>
+> **Current live version: v.0061.**
 
 ---
 
@@ -60,7 +73,10 @@ Things explicitly **not** important to the user:
 ```
                        Cloudflare (Workers Paid, ~$5/mo)
                        ─────────────────────────────────
-   browser ─ /v2/* ──────────────► fetchAdsb() ──► api.adsb.lol
+   browser ─ /live   ─────────────► TrackerDO snapshot (default live path)
+   browser ─ /v2/*   ─────────────► fetchAdsb() ──► api.adsb.lol
+                                                    (gated fallback for views
+                                                     outside the DO bbox)
    browser ─ /log/state ──────────► hemstracker worker ──► D1 (cached state)
    browser ─ /log/flights ────────► hemstracker worker ──► D1 (flight history)
    browser ─ /log/flight/<id>/track ► hemstracker worker ──► D1 (track points)
@@ -73,16 +89,31 @@ Things explicitly **not** important to the user:
                                        self-scheduled alarm every 3 s
                                        + cron heartbeat * * * * *
                                        state-machines fleet aircraft → D1
-                                       calls fetchAdsb() with bbox 150 nm
-                                       around NJ centroid
+                                       ┌────────────────────────────────┐
+                                       │ alarm() — Promise.allSettled:  │
+                                       │  ─► api.adsb.lol     /v2/lat   │
+                                       │  ─► api.airplanes.live /v2/point│
+                                       │  (adsb.fi tried + pulled —     │
+                                       │   blocks CF Worker egress IPs) │
+                                       │ → mergeAircraft() dedupes by   │
+                                       │   lowercase hex                │
+                                       │ → this.snapshot (in-mem +      │
+                                       │   Durable Storage)             │
+                                       │ → processAircraft × FLEET_REGS │
+                                       └────────────────────────────────┘
 ```
 
-- **Browser** (GitHub Pages, hemsnj.com): polls adsb.lol via the worker every
-  3 sec using a **single bbox query** (not per-reg) that returns all aircraft
-  in a region covering the fleet + the user's traffic radius. Splits the
-  response into fleet (by registration) vs traffic.
-- **TrackerDO**: self-schedules a 3-sec alarm, polls adsb.lol via bbox, runs
-  the state machine on each fleet aircraft, writes flight records to D1.
+- **Browser** (GitHub Pages, hemsnj.com): polls the worker's `/live` route
+  every 3 s — that serves the DO's shared snapshot, no upstream call.
+  Browser splits the merged list into fleet (by registration) vs traffic.
+  Falls through to a direct adsb.lol `/v2/lat/.../dist/...` call only when
+  the view extends outside the DO's NJ bbox.
+- **TrackerDO**: self-schedules a 3-sec alarm. Each alarm polls all active
+  ADS-B sources in parallel via `Promise.allSettled`, merges the responses
+  into one deduplicated aircraft list (lowercased hex key, freshest `seen`
+  wins position, missing fields backfilled), stores the merged snapshot
+  (in-memory + Durable Storage), and runs the flight state machine off the
+  merged list. Currently 2 active sources (adsb.lol + airplanes.live).
 - **D1 `hemstracker-logs`**: 5 tables — `aircraft_state`, `flights`,
   `track_points`, `airports` (~25k US heliports/airports from OurAirports).
 - **Sprite system**: `icons.webp` (the public adsbx aircraft sprite, 575×791,
@@ -136,7 +167,8 @@ Things explicitly **not** important to the user:
 | `pictures/` | Per-aircraft photos that render as a faded background on each fleet card. Manual `image:` overrides the auto-photo. Currently: `732hm.png`, `511HU.png`, `n456mt.png`. |
 | `CNAME` | Just `hemsnj.com` for GitHub Pages. |
 | `SETUP-cloudflare.md` | Original end-user worker setup walkthrough — outdated (predates DO + photo proxy). Doesn't hurt anything. |
-| `HANDOFF.md` | This document. |
+| `HANDOFF.md` | This document — broad onboarding. |
+| `CLAUDE.md` | Tight architectural quick-reference focused on the data-fetch path (v.0059+: shared snapshot, multi-source merge, gated fallback). Auto-loaded by Claude Code on session start. |
 | `.claude/launch.json` | Local preview-server config (Python http.server on port 8765) — gitignored. Use with the `mcp__Claude_Preview__*` tools to load the page at any viewport. |
 
 Memory files (auto-loaded by Claude) live in
@@ -187,7 +219,7 @@ fields. Required ones are starred. Defaults shown in parentheses.
 | `mapGlowColor` (`color`) | `"#0767f8"` | Halo color; falls back to the company color. |
 
 The **icon tester** in DEV TOOLS (bottom-left button) produces a paste-able
-snippet of these icon/glow fields — see Section 11.
+snippet of these icon/glow fields — see Section 13.
 
 ## 7. The major systems
 
@@ -273,30 +305,92 @@ Photographer credit: small italic text bottom-right of each card (`.fc-photo-cre
 and bottom-right of each popup photo (`.pop-credit`). Required by Planespotters'
 attribution terms.
 
-### 7-D. ADS-B feed (adsb.lol only) — fetchAdsb() helper
+### 7-D. ADS-B feed — shared snapshot + multi-source merge (v.0059–v.0061)
 
-Worker-side function `fetchAdsb(env, path)` at the top of
-`cloudflare-worker.js` is the single chokepoint for ADS-B feed calls.
-Both the `/v2/*` browser proxy AND the DO's bbox polling go through it.
+Two related changes that together cut upstream call volume to flat ~1/3 s
+and added redundancy:
 
-Currently a one-source proxy: hits `api.adsb.lol` with a 6-second
-AbortController timeout, returns a synthetic 502
-(`{ ac: [], error: "..." }`) on exception so callers never choke.
+**The shared snapshot (v.0059).** Every browser used to hit
+`/v2/lat/.../dist/...` every 3 s through the worker as a passthrough — fine
+at one visitor, would have rate-limited as traffic grew. Now:
+- The DO's `alarm()` writes the parsed bbox response into `this.snapshot`
+  in-memory AND persists it via `this.state.storage.put("snapshot", ...)`.
+- The DO constructor uses `state.blockConcurrencyWhile()` to hydrate
+  snapshot + per-source backoff state from Durable Storage before serving
+  any requests. Cold start / re-deploy doesn't dump visitors onto the
+  fallback path.
+- New `/live` route on the worker → DO singleton → returns envelope
+  `{ ts, ageMs, stale, bbox, ac, sources, backoffUntil }` with
+  `Cache-Control: no-store`.
+- Browser default polling path is `Api.live(focus, requestedRadius)` (in
+  `index.html`). It does a containment check
+  `distFromCenter + requestedRadius <= NJ_DO_BBOX.radius (150 nm)` — if the
+  visitor's view fits, it uses `/live` (zero upstream calls). Otherwise it
+  falls through to the gated direct adsb.lol path via
+  `Api.trafficNear` → worker `/v2/*` → `fetchAdsb()`. Rare in practice.
 
-**History note — adsbexchange fallback was tried + removed:**
-- v.0055 added a fallback path to adsbexchange (RapidAPI, via
-  `ADSBX_API_KEY` wrangler secret).
-- v.0056 briefly flipped adsbexchange to primary, reverted same day
-  (v.0057) after we realized the user is on RapidAPI Basic ($10/mo).
-- v.0058 ripped the fallback out entirely. User decided the complexity
-  + unknown billing behavior wasn't worth it; adsb.lol is reliable
-  enough on its own. The helper still has the 6s abort + safety 502 so
-  re-adding a fallback later is a one-block diff.
-- `ADSBX_API_KEY` Cloudflare secret may still exist — harmless if so
-  (worker no longer references it). Run `npx wrangler secret delete
-  ADSBX_API_KEY` to clean it up if you want.
+**Multi-source merge (v.0060–v.0061).** The DO's alarm now polls multiple
+community sources in parallel each cycle:
+- `SOURCES` table at the top of `cloudflare-worker.js` — each entry has
+  its own `pathFor()` because **path shape differs between sources**:
+  - `adsb.lol`: `/v2/lat/{lat}/lon/{lon}/dist/{nm}`
+  - `airplanes.live`: `/v2/point/{lat}/{lon}/{nm}` *(NOT lat/lon/dist!)*
+  - adsb.fi was tried (`/api/v3/lat/{lat}/lon/{lon}/dist/{nm}`) — see below.
+- `pollSource(source, sourceState)` — never throws, returns a tagged
+  result `{ name, status, ac?, count?, backoffMs?, error? }`. Mutates
+  per-source backoff on 429 (`Retry-After` honored, capped 5 min,
+  default 30 s).
+- `mergeAircraft(okResults)` — the merge rules:
+  1. **Lowercase the hex** before keying. The browser uses `ac.hex`
+     verbatim as a `Map` key with no case normalization — different cases
+     across sources would produce duplicate markers.
+  2. **Freshest sample wins position** (lowest `ac.seen`). Do not average.
+  3. **Backfill missing fields** (flight, squawk, t, category, desc,
+     ownOp, year, …) from the older record when the freshest one lacks
+     them. Empty arrays / empty strings are valid data, not "missing".
+  4. Aircraft in only one source pass through unchanged. That's the win.
+- **One `processAircraft()` call per fleet aircraft per tick** from the
+  merged list. Calling per-source would break the hysteresis state
+  machine (audit §8-E in the read-only audit conversation).
+- **Server-side outlier filter** on the distance_nm accumulation in
+  `processAircraft()` — mirrors the browser's `ingestFleetSample()` cap
+  `max(prev gs, new gs, 200 kt) × 1.6` scaled by elapsed time, 0.25 nm
+  slack. Protects `distance_nm` from multi-source jitter. Position itself
+  still flows into `aircraft_state` so hysteresis isn't disrupted.
+- **Per-source backoff state** (`this.sourceState`) replaces the single
+  `this.backoffUntil`. One source 429'ing doesn't disable the others. The
+  `/live` envelope only surfaces `backoffUntil` to the browser when EVERY
+  source is currently in backoff (= upstream truly delayed).
+- **`/live` envelope adds `sources[]`** — per-source health per cycle.
+  Used both for verification (`curl '.../live'` to see per-source counts)
+  and so the browser can ever expose multi-source UI later if wanted.
 
-### 7-E. Mobile UX (v.0049, v.0054)
+**Adsb.fi was tried in v.0060 and pulled in v.0061** because it blocks
+Cloudflare Worker egress IPs. Diagnostic process is captured in Section 10
+("Things learned this session"). Add it back when their CF block lifts or
+when we route through a non-CF host.
+
+**The browser's `/v2/*` gated fallback** uses the existing `fetchAdsb()`
+helper which stays adsb.lol-only. That path is rare (outside-NJ views) and
+doesn't need multi-source coverage.
+
+**Adsbexchange experiment is fully gone (v.0055→v.0058 archive).** The
+`ADSBX_API_KEY` Cloudflare secret may still exist — harmless if so. Run
+`npx wrangler secret delete ADSBX_API_KEY` if you want to clean it up.
+
+### 7-E. Status UI — feed-state surfacing
+
+`tick()` reads the `/live` envelope into `state.feedStale`,
+`state.feedBackoffUntil`, `state.feedAgeMs`. The status-dot block in
+`renderPanel()` has a priority chain:
+
+`ERR > BACKOFF (countdown) > DELAYED (age) > LIVE > CONNECTING`
+
+Amber `.status-dot.warn` distinguishes "data delayed" from "data live" so
+frozen positions never look fresh during a backoff. CSS rule lives next to
+the existing `.status-dot.ok` / `.status-dot.err` colors.
+
+### 7-F. Mobile UX (v.0049, v.0054)
 
 Map-first layout. Topbar = **☰ + brand + LIVE dot** only (the OPTIONS /
 TRAFFIC / HISTORY buttons that live in the topbar on desktop are hidden on
@@ -384,12 +478,26 @@ iOS-specific fixes:
     `fetchAdsb()` helper that tried adsbexchange (RapidAPI) as fallback,
     briefly flipped adsbexchange to primary in v.0056, reverted same day
     in v.0057 (user is on $10 Basic — 10k/mo cap), then removed the
-    entire fallback in v.0058. adsb.lol-only now. Helper kept (6s
-    timeout + safety 502); re-adding fallback later is a one-block diff.
+    entire fallback in v.0058. adsb.lol-only at that point.
+21. **Shared live snapshot (v.0059)** — new `/live` route on the worker
+    served from the DO's in-memory + Durable Storage snapshot. Browser
+    polls `/live` instead of `/v2/*`, so upstream call rate to adsb.lol
+    becomes flat 1/3 s regardless of visitor count. 429 backoff honors
+    `Retry-After`. UI surfaces stale + backoff via amber `.status-dot.warn`.
+22. **3-source merge attempted, 1 source pulled (v.0060–v.0061)** —
+    parallel `Promise.allSettled` poll of adsb.lol + airplanes.live +
+    adsb.fi inside `alarm()`. Merge dedupes by lowercased hex, freshest
+    `seen` wins position, missing fields backfilled. Single
+    `processAircraft()` call per fleet aircraft per tick from the merged
+    list (per the architecture-audit guidance). Server-side outlier
+    filter on `distance_nm`. Per-source backoff state. adsb.fi pulled
+    after confirming an IP/ASN block on Cloudflare Worker egress (same UA
+    returns 200 from a home IP, 403 from inside the worker — see Section
+    10). Currently 2 active sources, ~15-20 union-gain aircraft per cycle.
 
 ## 9. Current state
 
-- **Live at hemsnj.com**, version **v.0058**.
+- **Live at hemsnj.com**, version **v.0061**.
 - **Fleet: 8 aircraft, 5 companies** (see Section 5 for the colors):
   - `N732HM` — "Hackensack 2" — Brick (40.0783 / -74.1321), `pictures/732hm.png`, custom EC135 icon
   - `N551HU` — "Hackensack 1" — West Milford (41.1328 / -74.3406), `pictures/511HU.png`, custom EC135 icon
@@ -405,7 +513,134 @@ iOS-specific fixes:
   mostly empty (user has logged a few real flights from N456MT — the
   history overlay can show them).
 
-## 10. Outstanding / likely next requests
+## 10. Things learned this session — patterns + mistakes to avoid
+
+This section is mostly for the next Claude session, but the user reads it
+too. These are things that actually came up in the v.0059–v.0061 work and
+saved (or could have saved) significant cycles.
+
+### Diagnostic patterns that worked
+
+- **The user asks for "show me the plan + diff BEFORE you edit"** for any
+  meaningful change. Treat that as a hard requirement on architectural work
+  — they catch ambiguities and unit mismatches that would have shipped
+  silently. The wrangler-tail check on the shared-snapshot work is the
+  canonical example: they declared it "mandatory because it's the only
+  thing that catches a units mismatch."
+- **Verify units before writing the containment math.** Every distance
+  constant in this project is **nautical miles** end-to-end. `distanceNm()`
+  → nm (via `NM_PER_KM * km` haversine), `state.radiusNm` → nm,
+  `BBOX_RADIUS_NM = 150` → nm, adsb.lol's `dist` path param → nm,
+  `NJ_DO_BBOX.radius = 150` → nm. If something introduces km/meters
+  silently, every visitor falls through to the gated upstream and you
+  won't see it without watching `wrangler tail`.
+- **A 403 means the server responded.** It is NOT a network/firewall
+  block at our end — the request reached them, they refused it at the
+  application layer. Don't say "firewall block" when you mean "their
+  app-layer rejection." Likely causes for community APIs: cloud/datacenter
+  egress IP filtering, generic User-Agent screening, IP reputation.
+- **Verify per-source response shapes BEFORE designing the merge.**
+  airplanes.live uses `/v2/point/{lat}/{lon}/{nm}` — different path from
+  the other two. I assumed all three would mirror adsb.lol's path; that
+  cost a probing cycle. Always curl each source's example URL with
+  `python -m json.tool` before committing to a merge contract.
+- **Read raw README before writing code.** `WebFetch` summarizes — that's
+  useful for orientation but it can drop critical rules. The adsb.fi
+  README has a key line: *"Requests returning a 400, 401, 403, 404, or
+  429 status code count toward the limit. ... excessive invalid HTTP
+  requests results in a temporary IP address restriction."* WebFetch's
+  summary obscured this. Use `curl` on the raw `.md` for important docs.
+
+### Sloppy reasoning the user corrected me on
+
+- **I once called the adsb.fi 403 a "Cloudflare-to-Cloudflare firewall
+  block."** Wrong. They are themselves served via Cloudflare, but the 403
+  came from their application — could be a CF Rule they wrote, could be
+  their backend code. Either way it's an application-layer rejection, not
+  "network firewall." User caught this immediately.
+- **I brought up adsb.fi's "personal, non-commercial only" terms.** User
+  pushed back hard: this is a non-commercial personal project, the user is
+  the pilot of one of the helicopters, the site actively costs them money,
+  and the terms don't factor in to the technical question of "can we reach
+  them from a CF Worker." Lesson: **separate technical from policy** —
+  don't smuggle in policy framing on a technical conversation, and when
+  the user has already told you commercial framing doesn't apply, drop it.
+- **I jumped to "remove adsb.fi" without doing the cheap test first.**
+  The user re-routed me: "before pulling adsb.fi, do ONE cheap test —
+  swap to a real app-identifying User-Agent and check if it still 403s."
+  Cheap tests before destructive changes. They were right; the answer was
+  still "remove" but the test confirmed it was IP-based not UA-based,
+  which is genuinely useful information to record (in the comment above
+  `SOURCES` so a future session doesn't re-try the same thing).
+- **I didn't proactively show per-source health when the user wanted it.**
+  They had to explicitly ask me to dump per-source counts. Lesson: when
+  you ship multi-source infrastructure, **show the per-source health in
+  the same message** as the deploy confirmation. Don't make the user pull
+  it.
+
+### Where to look if a third source comes back
+
+The merge code in `cloudflare-worker.js` is set up so adding a source is
+literally one entry in the `SOURCES` array. Each entry needs:
+1. A unique `name` string.
+2. A `host` (no trailing slash).
+3. A `pathFor({ lat, lon, nm })` builder — **don't assume the shape;
+   verify from their docs / curl first**.
+4. The response must be ADSBexchange-v2-compatible (`{ ac: [...] }` with
+   `hex`, `r`, `lat`, `lon`, `alt_baro`, `gs`, `track`, etc. on each `ac`
+   record), or the merge will produce garbage. `pollSource` does no
+   field-mapping today.
+
+If you want to try adsb.fi again later (their CF block lifts, or you route
+through a non-CF host), add it back at the right path:
+`https://opendata.adsb.fi/api/v3/lat/{lat}/lon/{lon}/dist/{nm}`. Their
+rate limit is 1 req/sec (we'd be at 1/3 s — fine).
+
+If you're considering a brand-new source: candidates that have worked or
+been mentioned include OpenSky Network (auth-free at ~100 req/hr —
+probably too tight at 3 s cadence without batching), and other readsb /
+tar1090-ecosystem feeds. Verify the path + response shape and add the row.
+
+## 11. Where the project is heading
+
+Realistic short-term direction based on the user's stated priorities:
+
+- **Fleet growth toward 15–20 aircraft.** User has said this explicitly.
+  Section 13 (common operations) has the "add an aircraft" recipe — it's
+  mostly a 5-min job. Photos + per-aircraft icon tuning trail behind.
+- **Real flight data accumulating.** The DO state machine + outlier
+  filter + per-aircraft photos all work today; the system is waiting on
+  helicopters actually flying so the user can see the HISTORY overlay
+  populated with real altitude profiles + maps. There's nothing to build
+  here — just patience + watching the D1 grow.
+- **Adsb.fi might come back** if their CF block lifts (we'd see it the
+  next time someone re-tests). Worth doing once a month — a single curl
+  from inside the worker (via a debug route, or just re-adding to
+  SOURCES briefly) tells you.
+- **Per-aircraft icon tuning** for the new fleet (especially the State
+  Police birds — `map-icons/AW139Trooper.png` already exists and could
+  be wired up). User uses the in-app DEV TOOLS icon tester to dial these
+  in and pastes the snippet back.
+- **Manual card photos.** Planespotters auto-photos cover most cases,
+  but the user may want hand-picked PNGs for some entries (already done
+  for the 3 Hackensack / RWJ aircraft). `cfg.image` always wins.
+
+Things the user has explicitly said NOT to prioritize:
+- Emergency squawk highlighting.
+- Receiver-side decoding / self-hosting ADS-B.
+- Mobile-app conversion (was discussed; user decided PWA-only path is
+  enough if they ever want it).
+
+Things that *might* eventually matter but haven't been pushed for:
+- **A non-CF egress path** if adsb.fi (or future sources) stay
+  blocking-CF-Workers. Would mean either renting a tiny VPS to proxy, or
+  using a cheap host for the egress side of fetches. Significant infra
+  change; only worth it if a key source insists.
+- **Caching at the worker edge** on a few of the D1-backed endpoints
+  (`/log/airports/bbox`, `/log/flights`). Currently served fresh per
+  request — fine at current traffic, would matter at scale.
+
+## 12. Outstanding / likely next requests
 
 - **Manual card photos for the new aircraft.** Planespotters auto-photos are
   applied, but the user might want to drop hand-picked PNGs into `pictures/`
@@ -414,7 +649,7 @@ iOS-specific fixes:
 - **Exact base for N3NJ CentralSTAR.** Right now it's Waretown center
   because "200 Volunteer Way" isn't in OSM. If the user provides exact
   lat/lon, just patch the FLEET entry.
-- **More aircraft** — same template as Section 11.
+- **More aircraft** — same template as Section 13.
 - **Per-aircraft icon tuning.** User uses the icon tester in DEV TOOLS,
   copies the snippet, pastes it back; you splice it into the FLEET entry
   and bump version.
@@ -425,7 +660,7 @@ iOS-specific fixes:
   overlay's altitude chart + dedicated map + clean trail rendering
   becomes much more useful.
 
-## 11. How to do common operations
+## 13. How to do common operations
 
 ### Add an aircraft
 1. In `index.html`, append a new `FLEET` entry. Required: `registration`,
@@ -492,11 +727,17 @@ iOS-specific fixes:
   - If null, call `AircraftPhoto.fetchPhoto({hex})` async — by the time
     the user comes back, cache will be warm.
 
-## 12. Endpoints + commands cheat sheet
+## 14. Endpoints + commands cheat sheet
 
 ```bash
 # Worker health / endpoint list
 curl https://hemstracker.deltasteelfox92.workers.dev/
+
+# Shared live snapshot — what the browser polls every 3s. Returns
+# { ts, ageMs, stale, bbox, ac:[...], sources:[...], backoffUntil }.
+# `sources` carries per-source health for verification.
+curl -s https://hemstracker.deltasteelfox92.workers.dev/live \
+  | python -c "import sys,json; d=json.load(sys.stdin); print(f'merged={len(d[\"ac\"])} ageMs={d[\"ageMs\"]}'); [print(f'  {s[\"name\"]:18} {s[\"status\"]:10} count={s[\"count\"]}') for s in d['sources']]"
 
 # Current state of every tracked aircraft
 curl https://hemstracker.deltasteelfox92.workers.dev/log/state
@@ -520,8 +761,9 @@ curl 'https://hemstracker.deltasteelfox92.workers.dev/log/airports/bbox?n=41.5&s
 curl 'https://hemstracker.deltasteelfox92.workers.dev/log/photo?reg=N3NJ'
 curl 'https://hemstracker.deltasteelfox92.workers.dev/log/photo?hex=a3f930'
 
-# Live position of one aircraft (browser used to use this; switched to bbox in v.0043).
-# All /v2/* paths route through fetchAdsb() — adsb.lol only since v.0058.
+# Live position of one aircraft via the gated browser fallback path.
+# /v2/* routes through fetchAdsb() — adsb.lol only. Used only when a
+# visitor's view falls outside the DO's NJ bbox; default browser path is /live.
 curl https://hemstracker.deltasteelfox92.workers.dev/v2/reg/N732HM
 ```
 
@@ -540,10 +782,15 @@ wrangler d1 execute hemstracker-logs --remote --command "SELECT COUNT(*) FROM ai
 
 ---
 
-**TL;DR for the next session:** Read the memory files. Read this doc. The
-user will probably hand you more tail numbers + addresses to add, request
-manual card photos for the new helos, ask for icon tuning, or report a
-mobile glitch. Bump the version, deploy the worker if you touched it, push
-to GitHub. The smooth-tracking pipeline, HISTORY overlay, and AircraftPhoto
-module are intentionally self-contained — if you add features, follow that
-isolation pattern so you don't make the system fragile.
+**TL;DR for the next session:** Read the memory files. Read this doc.
+Read CLAUDE.md (it's the architectural quick-reference for the data-fetch
+path specifically). The user will probably hand you more tail numbers +
+addresses to add, request manual card photos, ask for icon tuning, or
+report a mobile glitch. Bump the version, deploy the worker if you
+touched it, push to GitHub. The smooth-tracking pipeline, HISTORY overlay,
+AircraftPhoto module, and shared-snapshot fetch path are intentionally
+self-contained — if you add features, follow that isolation pattern.
+**On anything architectural: show a plan + diff BEFORE you edit and
+include a verification step the user can run themselves (e.g.
+`wrangler tail` + per-source counts). Section 10 has the patterns and
+the mistakes I made this session so you can skip them.**
