@@ -10,3 +10,9 @@ desktop.ini
 .wrangler/
 *.swp
 *~
+
+# Personal-context docs — kept local-only since they contain user-specific
+# operational info (CF account ID, email, base addresses, etc.). Claude
+# Code still reads them from disk for in-session context.
+HANDOFF.md
+CLAUDE.md
