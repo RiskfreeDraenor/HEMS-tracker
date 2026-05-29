@@ -5,11 +5,13 @@
 //   1) /v2/*  → ADS-B passthrough (adsb.lol only, with timeout). Used only as
 //      the GATED browser fallback when a visitor's view falls outside the
 //      DO's NJ bbox. Default browser path is /live.
-//   2) TrackerDO Durable Object polls THREE community ADS-B sources in
-//      parallel every 3s (adsb.lol + airplanes.live + adsb.fi), merges them
-//      into one deduplicated aircraft list, stores the merged snapshot for
-//      /live, runs the flight state machine off the merged list, and writes
-//      flight records to D1. Browser reads history through /log/* endpoints.
+//   2) TrackerDO Durable Object polls multiple community ADS-B sources in
+//      parallel every 3s (adsb.lol + airplanes.live; adsb.fi was tried but
+//      blocks Cloudflare Worker egress IPs — see comment on SOURCES below),
+//      merges them into one deduplicated aircraft list, stores the merged
+//      snapshot for /live, runs the flight state machine off the merged
+//      list, and writes flight records to D1. Browser reads history through
+//      /log/* endpoints.
 //
 //  PRECISION (v.0021):
 //   - Takeoff/landing time + position are recorded from the FIRST tick where
@@ -26,7 +28,7 @@
 //
 //  ENDPOINTS:
 //    /v2/*                       adsb.lol passthrough (gated browser fallback)
-//    /live                       merged 3-source NJ-bbox snapshot (default path)
+//    /live                       merged ADS-B snapshot (adsb.lol + airplanes.live)
 //    /log/state                  current state of every fleet aircraft
 //    /log/flights?reg=…&limit=…  flight history (newest first)
 //    /log/flight/<id>/track      full track points for one flight
@@ -74,6 +76,12 @@ const AIRPORT_BBOX_DEG = 0.05;      // pre-filter bbox (~3nm) before haversine s
 const ADSB_LOL_HOST   = "api.adsb.lol";
 const ADSB_TIMEOUT_MS = 6000;
 
+// adsb.fi was tried in v.0060 (https://opendata.adsb.fi/api/v3/lat/.../lon/.../dist/...)
+// but their server blocks requests from Cloudflare Worker egress IPs — confirmed
+// via a controlled UA test (200 OK from a home IP with the exact same UA we
+// send from the worker; persistent 403 from inside the worker). It's IP/ASN-
+// based filtering, not something we can fix here. Add the entry back when
+// adsb.fi opens up CF egress or we route through a non-CF host.
 const SOURCES = [
   {
     name:    "adsb.lol",
@@ -84,11 +92,6 @@ const SOURCES = [
     name:    "airplanes.live",
     host:    "https://api.airplanes.live",
     pathFor: ({ lat, lon, nm }) => `/v2/point/${lat}/${lon}/${nm}`,
-  },
-  {
-    name:    "adsb.fi",
-    host:    "https://opendata.adsb.fi",
-    pathFor: ({ lat, lon, nm }) => `/api/v3/lat/${lat}/lon/${lon}/dist/${nm}`,
   },
 ];
 
@@ -118,7 +121,13 @@ async function pollSource(source, sourceState) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
     const res = await fetch(`${source.host}${path}`, {
-      headers: { "Accept": "application/json", "User-Agent": "hems-tracker/1.0 (+https://hemsnj.com)" },
+      headers: {
+        "Accept":     "application/json",
+        // App-identifying UA — generic UA strings often trigger 403s on community APIs
+        // that filter cloud/datacenter egress. Including the site URL gives the
+        // operator a clear contact path if they ever want to reach us.
+        "User-Agent": "hemsnj.com HEMS situational-awareness tracker (contact: https://hemsnj.com)",
+      },
       signal: ctrl.signal,
     });
     clearTimeout(t);
@@ -193,7 +202,10 @@ async function fetchAdsb(_env, path) {
     const ctrl = new AbortController();
     const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
     const res = await fetch(`https://${ADSB_LOL_HOST}${path}`, {
-      headers: { "Accept": "application/json", "User-Agent": "hems-tracker/1.0" },
+      headers: {
+        "Accept":     "application/json",
+        "User-Agent": "hemsnj.com HEMS situational-awareness tracker (contact: https://hemsnj.com)",
+      },
       signal: ctrl.signal,
     });
     clearTimeout(t);
@@ -246,7 +258,7 @@ export default {
       "HEMS Tracker proxy + logger.\n" +
       "Endpoints:\n" +
       "  /v2/*                      adsb.lol passthrough (gated browser fallback)\n" +
-      "  /live                      merged 3-source snapshot (adsb.lol+airplanes.live+adsb.fi)\n" +
+      "  /live                      merged ADS-B snapshot (adsb.lol + airplanes.live)\n" +
       "  /log/state                 current fleet state\n" +
       "  /log/flights?reg=…         flight history\n" +
       "  /log/flight/<id>/track     track points\n" +
