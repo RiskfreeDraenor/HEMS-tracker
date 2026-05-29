@@ -969,7 +969,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0066</div>
+  <div id="version">v.0067</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1840,6 +1840,7 @@ const Radar = (() => {
   const HOLD_MS    = 1300;       // extra hold on the newest frame before looping
   const REFRESH_MS = 600000;     // re-pull the frame index every 10 min while on
   const STALE_MS   = 480000;     // treat cached frames as stale after 8 min
+  const MAX_NATIVE_Z = 7;        // RainViewer serves radar tiles only to z7 — above this Leaflet upscales the z7 tile. Requesting z8+ returns a "Zoom Level Not Supported" placeholder tile, so this cap is required.
 
   const st = { on:false, opacity:0.65, host:null, frames:[], layers:[],
                idx:0, playing:true, fetchedAt:0, animTimer:null,
@@ -1863,7 +1864,7 @@ const Radar = (() => {
   function buildLayers(){
     ensurePane(); clearLayers();
     st.layers = st.frames.map((f) => L.tileLayer(tileUrl(f.path),
-      { pane:"radar", opacity:0, tileSize:256, maxZoom:18 }).addTo(map));
+      { pane:"radar", opacity:0, tileSize:256, maxNativeZoom: MAX_NATIVE_Z, maxZoom:18 }).addTo(map));
     const s = $("radar-scrub");
     if (s) s.max = String(Math.max(0, st.frames.length - 1));
   }
