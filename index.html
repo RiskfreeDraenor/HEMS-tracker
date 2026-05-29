@@ -173,7 +173,7 @@ const SETTINGS = {
     --c-bg: #0a0e1a; --c-bg-2: #0d1322; --c-surface: #11162a; --c-surface-2: #161c34;
     --c-border: #1f2940; --c-border-2: #2a3754;
     --c-text: #e8edf5; --c-muted: #7a8499; --c-dim: #4a5470;
-    --c-fleet: #FFB800; --c-traffic: #88AAFF; --c-warn: #FF3B3B; --c-ok: #00FF9D;
+    --c-fleet: #FFB800; --c-traffic: #88AAFF; --c-warn: #FF3B3B; --c-ok: #00FF9D; --c-radar: #38BDF8;
     --f-mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   }
   * { box-sizing: border-box; }
@@ -438,6 +438,36 @@ const SETTINGS = {
     display: inline-flex; align-items: center; gap: 6px; line-height: 1;
   }
   #history-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-fleet); color: var(--c-fleet); }
+
+  /* RADAR toggle button in the topbar — same shape as OPTIONS/HISTORY, plus a lit
+     "active" state since it's a stateful on/off toggle (not a panel opener). */
+  #radar-open-btn {
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    font-family: var(--f-mono); font-size: 10px; letter-spacing: .2em; font-weight: 600;
+    padding: 6px 12px; cursor: pointer; transition: all .15s ease;
+    display: inline-flex; align-items: center; gap: 6px; line-height: 1;
+  }
+  #radar-open-btn:hover { background: var(--c-surface-2); border-color: var(--c-radar); color: var(--c-radar); }
+  #radar-open-btn.active { background: var(--c-radar); border-color: var(--c-radar); color: #04121f; }
+  .drawer-actions button#drawer-radar-btn.active { border-color: var(--c-radar); color: var(--c-radar); }
+
+  /* RADAR animation control bar — bottom-center floating bar, below panels/drawer. */
+  #radar-bar {
+    position: fixed; z-index: 1300; bottom: 14px; left: 50%; transform: translateX(-50%);
+    display: flex; align-items: center; gap: 10px;
+    width: min(380px, calc(100vw - 96px)); padding: 8px 12px;
+    background: var(--c-bg-2); border: 1px solid var(--c-border-2);
+    box-shadow: 0 8px 32px rgba(0,0,0,0.6); font-family: var(--f-mono);
+  }
+  #radar-bar.hidden { display: none; }
+  #radar-play-btn {
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-radar);
+    font-family: var(--f-mono); font-size: 11px; padding: 4px 8px; min-width: 32px;
+    cursor: pointer; line-height: 1; flex: 0 0 auto;
+  }
+  #radar-play-btn:hover { background: var(--c-surface-2); border-color: var(--c-radar); }
+  #radar-scrub { flex: 1 1 auto; }
+  #radar-time { flex: 0 0 auto; min-width: 58px; text-align: right; font-size: 10px; letter-spacing: .1em; color: var(--c-muted); }
 
   /* Shared bar / body / close-btn for all floating panels */
   .dev-bar, .float-bar {
@@ -748,6 +778,7 @@ const SETTINGS = {
       <div class="topbar-right">
         <button id="options-open-btn"><span class="btn-icon">⚙</span><span class="btn-text">OPTIONS</span></button>
         <button id="history-open-btn"><span class="btn-icon">📋</span><span class="btn-text">HISTORY</span></button>
+        <button id="radar-open-btn"><span class="btn-icon">🌧</span><span class="btn-text">RADAR</span></button>
         <button id="traffic-open-btn"><span class="btn-icon">📡</span><span class="btn-text">TRAFFIC</span><span class="traffic-count" id="traffic-count-btn">0</span></button>
       </div>
     </header>
@@ -760,6 +791,7 @@ const SETTINGS = {
       <div class="drawer-actions">
         <button id="drawer-options-btn"><span class="icon">⚙</span><span>OPTIONS</span></button>
         <button id="drawer-history-btn"><span class="icon">📋</span><span>HISTORY</span></button>
+        <button id="drawer-radar-btn"><span class="icon">🌧</span><span>RADAR</span></button>
         <button id="drawer-traffic-btn"><span class="icon">📡</span><span>TRAFFIC</span><span class="count traffic-count" id="drawer-traffic-count">0</span></button>
       </div>
 
@@ -814,6 +846,11 @@ const SETTINGS = {
       <label class="airports-labels-toggle">
         <input type="checkbox" id="airports-labels-check" /> SHOW NAMES
       </label>
+      <div class="radius-row" style="margin-top:10px;">
+        <label for="radar-opacity-slider">RADAR OPACITY</label>
+        <span id="radar-opacity-readout">65%</span>
+      </div>
+      <input type="range" id="radar-opacity-slider" min="10" max="100" value="65" step="5" />
     </div>
   </div>
 
@@ -826,6 +863,14 @@ const SETTINGS = {
     <div class="float-body" style="padding: 0;">
       <ul id="traffic-list"></ul>
     </div>
+  </div>
+
+  <!-- RADAR animation control — visible only while the radar overlay is on.
+       Bottom-center: play/pause, frame scrubber, and the frame's age readout. -->
+  <div id="radar-bar" class="hidden">
+    <button id="radar-play-btn" title="Play / pause">❚❚</button>
+    <input type="range" id="radar-scrub" min="0" max="0" value="0" step="1" />
+    <span id="radar-time">—</span>
   </div>
 
   <!-- HISTORY full-viewport overlay — opened from the topbar HISTORY button or any
@@ -924,7 +969,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0065</div>
+  <div id="version">v.0066</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -1777,6 +1822,133 @@ function togglePanel(id){
   if (p.classList.contains("hidden")) openPanel(id); else closePanel(id);
 }
 
+/* ==================================================================
+   RADAR — RainViewer animated weather overlay (self-contained module).
+   Off by default; toggled from the topbar / drawer RADAR button. Pulls
+   RainViewer's public frame index (no API key), builds one tile layer per
+   frame in a dedicated map pane *below* the aircraft, and animates them
+   with the play/pause + scrubber bar (#radar-bar). Opacity is user-tunable
+   from the OPTIONS panel. If RainViewer is unreachable the module degrades
+   quietly (logs a warning, flips back off) and the tracker is unaffected.
+   ================================================================== */
+const Radar = (() => {
+  const API        = "https://api.rainviewer.com/public/weather-maps.json";
+  const COLOR      = 4;          // RainViewer color scheme (4 = The Weather Channel)
+  const TILE_OPTS  = "1_1";      // {smooth}_{snow}
+  const ATTR       = 'radar &copy; <a href="https://www.rainviewer.com/">RainViewer</a>';
+  const FRAME_MS   = 500;        // ms per frame while playing
+  const HOLD_MS    = 1300;       // extra hold on the newest frame before looping
+  const REFRESH_MS = 600000;     // re-pull the frame index every 10 min while on
+  const STALE_MS   = 480000;     // treat cached frames as stale after 8 min
+
+  const st = { on:false, opacity:0.65, host:null, frames:[], layers:[],
+               idx:0, playing:true, fetchedAt:0, animTimer:null,
+               refreshTimer:null, loading:false };
+  const $ = (id) => document.getElementById(id);
+
+  function ensurePane(){
+    if (!map.getPane("radar")){
+      map.createPane("radar");
+      const p = map.getPane("radar");
+      p.style.zIndex = 250;            // base tiles 200 < radar < overlay 400 (trails/markers stay on top)
+      p.style.pointerEvents = "none";  // radar never intercepts map interaction
+    }
+  }
+  const tileUrl = (path) => `${st.host}${path}/256/{z}/{x}/{y}/${COLOR}/${TILE_OPTS}.png`;
+
+  function clearLayers(){
+    st.layers.forEach((l) => { try { map.removeLayer(l); } catch(e){} });
+    st.layers = [];
+  }
+  function buildLayers(){
+    ensurePane(); clearLayers();
+    st.layers = st.frames.map((f) => L.tileLayer(tileUrl(f.path),
+      { pane:"radar", opacity:0, tileSize:256, maxZoom:18 }).addTo(map));
+    const s = $("radar-scrub");
+    if (s) s.max = String(Math.max(0, st.frames.length - 1));
+  }
+  function fmtAge(f){
+    const m = Math.round((f.time * 1000 - Date.now()) / 60000);
+    return Math.abs(m) <= 1 ? "now" : (m > 0 ? "+" : "") + m + " min";
+  }
+  function showFrame(i){
+    if (!st.layers.length) return;
+    i = (i % st.layers.length + st.layers.length) % st.layers.length;
+    st.layers.forEach((l, j) => l.setOpacity(j === i && st.on ? st.opacity : 0));
+    st.idx = i;
+    const s = $("radar-scrub"), t = $("radar-time");
+    if (s) s.value = String(i);
+    if (t && st.frames[i]) t.textContent = fmtAge(st.frames[i]);
+  }
+  function scheduleNext(ms){
+    clearTimeout(st.animTimer);
+    if (st.on && st.playing) st.animTimer = setTimeout(stepNext, ms);
+  }
+  function stepNext(){
+    const next = st.idx >= st.frames.length - 1 ? 0 : st.idx + 1;
+    showFrame(next);
+    scheduleNext(next === st.frames.length - 1 ? HOLD_MS : FRAME_MS);
+  }
+  function play(){
+    st.playing = true;
+    const b = $("radar-play-btn"); if (b) b.textContent = "❚❚";
+    scheduleNext(FRAME_MS);
+  }
+  function pause(){
+    st.playing = false;
+    clearTimeout(st.animTimer);
+    const b = $("radar-play-btn"); if (b) b.textContent = "▶";
+  }
+  async function loadFrames(force){
+    if (st.loading) return;
+    if (!force && st.frames.length && Date.now() - st.fetchedAt < STALE_MS) return;
+    st.loading = true;
+    try {
+      const res = await fetch(API, { cache:"no-store" });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const d = await res.json();
+      const past = (d.radar && d.radar.past) || [];
+      const fr = past.concat((d.radar && d.radar.nowcast) || []);
+      if (!d.host || !fr.length) throw new Error("no frames");
+      st.host = d.host; st.frames = fr; st.fetchedAt = Date.now();
+    } catch(e){
+      console.warn("[Radar] frame load failed:", e);
+    } finally {
+      st.loading = false;
+    }
+  }
+  async function enable(){
+    if (st.on) return;
+    st.on = true;
+    if ($("radar-open-btn"))   $("radar-open-btn").classList.add("active");
+    if ($("drawer-radar-btn")) $("drawer-radar-btn").classList.add("active");
+    if ($("radar-bar"))        $("radar-bar").classList.remove("hidden");
+    await loadFrames(false);
+    if (!st.on) return;        // toggled back off during the fetch — disable() already cleaned up
+    if (!st.frames.length){ console.warn("[Radar] unavailable — no frames"); disable(); return; }
+    buildLayers();             // (re)build layers for the current frames — disable() clears them, so this must run on every enable
+    map.attributionControl.addAttribution(ATTR);
+    showFrame(0); play();   // animate the full ~2h arc up to now (+ forecast if present), then loop
+    clearInterval(st.refreshTimer);
+    st.refreshTimer = setInterval(() => loadFrames(true).then(() => { if (st.on) { buildLayers(); showFrame(st.idx); } }), REFRESH_MS);
+  }
+  function disable(){
+    st.on = false;
+    if ($("radar-open-btn"))   $("radar-open-btn").classList.remove("active");
+    if ($("drawer-radar-btn")) $("drawer-radar-btn").classList.remove("active");
+    if ($("radar-bar"))        $("radar-bar").classList.add("hidden");
+    clearTimeout(st.animTimer); clearInterval(st.refreshTimer);
+    try { map.attributionControl.removeAttribution(ATTR); } catch(e){}
+    clearLayers();
+  }
+  return {
+    toggle(){ st.on ? disable() : enable(); },
+    togglePlay(){ if (st.on) (st.playing ? pause() : play()); },
+    onScrub(i){ pause(); showFrame(Number(i)); },
+    setOpacity(v){ st.opacity = Math.max(0, Math.min(1, v)); if (st.on) showFrame(st.idx); }
+  };
+})();
+
 /* ---------- Worker fetch helpers ---------- */
 async function fetchFlightsForReg(reg){
   if (!workerLogBase) return [];
@@ -2377,6 +2549,16 @@ function initUI(){
     btn.addEventListener("click", () => closePanel(btn.dataset.target));
   });
 
+  // ===== RADAR — stateful on/off toggle (not a panel) + its animation controls =====
+  document.getElementById("radar-open-btn").addEventListener("click", () => Radar.toggle());
+  document.getElementById("radar-play-btn").addEventListener("click", () => Radar.togglePlay());
+  document.getElementById("radar-scrub").addEventListener("input", (e) => Radar.onScrub(e.target.value));
+  document.getElementById("radar-opacity-slider").addEventListener("input", (e) => {
+    const v = Number(e.target.value);
+    Radar.setOpacity(v / 100);
+    document.getElementById("radar-opacity-readout").textContent = v + "%";
+  });
+
   // ===== HISTORY overlay — topbar trigger + close button. ESC also closes it. =====
   document.getElementById("history-open-btn").addEventListener("click", () => openHistoryOverlay());
   document.getElementById("ov-close-btn").addEventListener("click", closeHistoryOverlay);
@@ -2409,6 +2591,9 @@ function initUI(){
   });
   document.getElementById("drawer-history-btn").addEventListener("click", () => {
     closeDrawer(); openHistoryOverlay();
+  });
+  document.getElementById("drawer-radar-btn").addEventListener("click", () => {
+    closeDrawer(); Radar.toggle();
   });
 
   // ===== ICON TESTER =====
