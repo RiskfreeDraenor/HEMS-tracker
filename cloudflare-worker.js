@@ -2,10 +2,14 @@
 //  HEMS Tracker — Cloudflare Worker
 //
 //  Two responsibilities:
-//   1) /v2/*  → ADS-B feed for the browser. Pure adsb.lol proxy (with timeout).
-//   2) TrackerDO Durable Object polls adsb.lol every 3s, runs a state
-//      machine on each fleet aircraft, and writes flight records to D1.
-//      Browser reads history through /log/* endpoints below.
+//   1) /v2/*  → ADS-B passthrough (adsb.lol only, with timeout). Used only as
+//      the GATED browser fallback when a visitor's view falls outside the
+//      DO's NJ bbox. Default browser path is /live.
+//   2) TrackerDO Durable Object polls THREE community ADS-B sources in
+//      parallel every 3s (adsb.lol + airplanes.live + adsb.fi), merges them
+//      into one deduplicated aircraft list, stores the merged snapshot for
+//      /live, runs the flight state machine off the merged list, and writes
+//      flight records to D1. Browser reads history through /log/* endpoints.
 //
 //  PRECISION (v.0021):
 //   - Takeoff/landing time + position are recorded from the FIRST tick where
@@ -21,7 +25,8 @@
 //    "* * * * *"  — heartbeat every minute
 //
 //  ENDPOINTS:
-//    /v2/*                       adsb.lol passthrough
+//    /v2/*                       adsb.lol passthrough (gated browser fallback)
+//    /live                       merged 3-source NJ-bbox snapshot (default path)
 //    /log/state                  current state of every fleet aircraft
 //    /log/flights?reg=…&limit=…  flight history (newest first)
 //    /log/flight/<id>/track      full track points for one flight
@@ -51,16 +56,138 @@ const AIRPORT_MAX_NM   = 2.5;       // closer than this counts as "at" the airpo
 const AIRPORT_BBOX_DEG = 0.05;      // pre-filter bbox (~3nm) before haversine sort
 
 // ============================================================================
-//  ADS-B feed (adsb.lol only)
+//  ADS-B feeds (3-source merge in the DO; adsb.lol-only fallback for browser)
 // ============================================================================
-// Single source: adsb.lol. Free, unlimited, no key. We briefly experimented
-// with an adsbexchange (RapidAPI) fallback in v.0055–v.0057 — pulled in
-// v.0058 because we couldn't get a clean answer on whether the displayed
-// 10k/month Basic quota would ever start getting enforced. Helper kept
-// (with its 6s abort timeout + synthetic-502 safety net) so adding a
-// fallback again later is just one extra try/catch block.
+// The DO polls THREE community feeds in parallel each tick and merges their
+// responses into one deduplicated aircraft list. Different feeders are
+// connected to different aggregators, so each source catches some aircraft
+// the others miss. All three are free, no keys, ~0.33 req/sec each at our
+// cadence (well under any limit).
+//
+// IMPORTANT: airplanes.live uses a different path shape from the other two
+// (/v2/point/{lat}/{lon}/{nm} instead of /v2/lat/.../lon/.../dist/{nm}).
+// Each source carries its own pathFor() builder for that reason.
+//
+// The browser-side gated fallback (worker /v2/* passthrough → fetchAdsb)
+// stays adsb.lol-only — it's only used when a visitor's view falls outside
+// the DO's NJ bbox, which is rare and doesn't need multi-source coverage.
 const ADSB_LOL_HOST   = "api.adsb.lol";
 const ADSB_TIMEOUT_MS = 6000;
+
+const SOURCES = [
+  {
+    name:    "adsb.lol",
+    host:    "https://api.adsb.lol",
+    pathFor: ({ lat, lon, nm }) => `/v2/lat/${lat}/lon/${lon}/dist/${nm}`,
+  },
+  {
+    name:    "airplanes.live",
+    host:    "https://api.airplanes.live",
+    pathFor: ({ lat, lon, nm }) => `/v2/point/${lat}/${lon}/${nm}`,
+  },
+  {
+    name:    "adsb.fi",
+    host:    "https://opendata.adsb.fi",
+    pathFor: ({ lat, lon, nm }) => `/api/v3/lat/${lat}/lon/${lon}/dist/${nm}`,
+  },
+];
+
+// Parses Retry-After header (numeric seconds OR HTTP-date). Caps at 5 min,
+// defaults to 30 s when no header is given. Returns ms.
+function parseRetryAfterMs(headerValue) {
+  if (!headerValue) return 30000;
+  const sec = parseInt(headerValue, 10);
+  if (Number.isFinite(sec) && sec > 0) return Math.min(sec * 1000, 300000);
+  const t = Date.parse(headerValue);
+  if (Number.isFinite(t)) return Math.max(1000, Math.min(t - Date.now(), 300000));
+  return 30000;
+}
+
+// Polls one source. Never throws — always returns a tagged result so
+// Promise.allSettled siblings remain unaffected. Mutates `sourceState[name]`
+// on 429 to set the per-source backoff.
+async function pollSource(source, sourceState) {
+  const s = sourceState[source.name] || { backoffUntil: 0 };
+  if (s.backoffUntil && Date.now() < s.backoffUntil) {
+    return { name: source.name, status: "backoff", backoffUntil: s.backoffUntil };
+  }
+  const path = source.pathFor({
+    lat: BBOX_CENTER.lat, lon: BBOX_CENTER.lon, nm: BBOX_RADIUS_NM,
+  });
+  try {
+    const ctrl = new AbortController();
+    const t = setTimeout(() => ctrl.abort(), ADSB_TIMEOUT_MS);
+    const res = await fetch(`${source.host}${path}`, {
+      headers: { "Accept": "application/json", "User-Agent": "hems-tracker/1.0 (+https://hemsnj.com)" },
+      signal: ctrl.signal,
+    });
+    clearTimeout(t);
+    if (res.status === 429) {
+      const backoffMs = parseRetryAfterMs(res.headers.get("Retry-After"));
+      sourceState[source.name] = { backoffUntil: Date.now() + backoffMs };
+      console.warn(`${source.name} 429 — backing off ${backoffMs}ms`);
+      return { name: source.name, status: "429", backoffMs };
+    }
+    if (!res.ok) {
+      return { name: source.name, status: `http_${res.status}` };
+    }
+    const data = await res.json();
+    // Successful poll clears any prior backoff for this source.
+    if (s.backoffUntil) sourceState[source.name] = { backoffUntil: 0 };
+    const ac = Array.isArray(data && data.ac) ? data.ac : [];
+    return { name: source.name, status: "ok", ac, count: ac.length };
+  } catch (e) {
+    return { name: source.name, status: "error", error: (e && e.message) || String(e) };
+  }
+}
+
+// Merge multiple per-source results into one deduplicated aircraft list.
+// Rules (from the audit + user spec):
+//   - normalize hex to lowercase BEFORE keying (browser uses ac.hex verbatim
+//     as a Map key with no case normalization — different cases would
+//     produce duplicate markers).
+//   - within a duplicate-hex group, the record with the LOWEST `seen` value
+//     (freshest) wins position. We do NOT average positions.
+//   - missing fields on the freshest record (flight, squawk, t, category,
+//     desc, ownOp, year, etc.) are backfilled from the other sources.
+//   - aircraft present in only one source pass through as-is (this is the
+//     whole point — catching what adsb.lol misses).
+// Output shape is identical to a single-source data.ac array — downstream
+// (snapshot, /live, processAircraft) is unaffected.
+function mergeAircraft(okResults) {
+  const merged = Object.create(null);
+  for (const r of okResults) {
+    for (const ac of (r.ac || [])) {
+      const rawHex = ac && ac.hex;
+      if (typeof rawHex !== "string") continue;
+      const hex = rawHex.toLowerCase().trim();
+      if (!hex) continue;
+      const incoming = { ...ac, hex };           // shallow clone + normalized hex
+      const existing = merged[hex];
+      if (!existing) { merged[hex] = incoming; continue; }
+      const existingSeen = Number.isFinite(existing.seen) ? existing.seen : Infinity;
+      const incomingSeen = Number.isFinite(incoming.seen) ? incoming.seen : Infinity;
+      if (incomingSeen < existingSeen) {
+        // Incoming is fresher — replace, then backfill from the prior (older) record.
+        for (const k of Object.keys(existing)) {
+          if (incoming[k] == null && existing[k] != null) incoming[k] = existing[k];
+        }
+        merged[hex] = incoming;
+      } else {
+        // Existing is fresher — backfill any missing fields from the older incoming.
+        for (const k of Object.keys(incoming)) {
+          if (existing[k] == null && incoming[k] != null) existing[k] = incoming[k];
+        }
+      }
+    }
+  }
+  return Object.values(merged);
+}
+
+// Browser /v2/* gated fallback — adsb.lol-only with 6s timeout. Used only for
+// outside-NJ visitor views (Api.live falls through to Api.trafficNear in that
+// rare case). Kept here so the multi-source DO logic and the browser fallback
+// path stay decoupled.
 async function fetchAdsb(_env, path) {
   try {
     const ctrl = new AbortController();
@@ -74,7 +201,6 @@ async function fetchAdsb(_env, path) {
   } catch (e) {
     console.error(`adsb.lol fetch failed: ${e && e.message || e}`);
   }
-  // Synthetic 502 with the JSON shape callers expect, so nothing chokes downstream.
   return new Response(JSON.stringify({ ac: [], error: "adsb.lol unavailable" }), {
     status: 502,
     headers: { "Content-Type": "application/json" },
@@ -120,7 +246,7 @@ export default {
       "HEMS Tracker proxy + logger.\n" +
       "Endpoints:\n" +
       "  /v2/*                      adsb.lol passthrough (gated browser fallback)\n" +
-      "  /live                      shared NJ-bbox snapshot (DO-served, default path)\n" +
+      "  /live                      merged 3-source snapshot (adsb.lol+airplanes.live+adsb.fi)\n" +
       "  /log/state                 current fleet state\n" +
       "  /log/flights?reg=…         flight history\n" +
       "  /log/flight/<id>/track     track points\n" +
@@ -150,11 +276,20 @@ export class TrackerDO {
     // resilience). Without storage persistence, a worker re-deploy or DO
     // eviction would briefly dump every connected visitor onto the gated
     // direct adsb.lol fallback while we wait for the next alarm.
-    this.snapshot     = null;   // { ts, bbox: {lat,lon,radius}, ac: [...] }
-    this.backoffUntil = 0;      // ms epoch; skip upstream poll until past this
+    this.snapshot     = null;   // { ts, bbox, ac: [...], sources: [{name,status,count,...}] }
+    // Per-source backoff state. Each SOURCES entry gets its own { backoffUntil }.
+    // One source 429'ing or going down doesn't disable the others — merge keeps
+    // running with whoever responded. /live only surfaces backoffUntil if EVERY
+    // source is currently in backoff (= "data delayed" from the UI's POV).
+    this.sourceState  = {};
     this.state.blockConcurrencyWhile(async () => {
-      this.snapshot     = (await this.state.storage.get("snapshot"))     || null;
-      this.backoffUntil = (await this.state.storage.get("backoffUntil")) || 0;
+      this.snapshot    = (await this.state.storage.get("snapshot"))    || null;
+      this.sourceState = (await this.state.storage.get("sourceState")) || {};
+      // Ensure every configured source has an entry (handles new sources after
+      // a deploy where storage was populated with an older SOURCES list).
+      for (const s of SOURCES) {
+        if (!this.sourceState[s.name]) this.sourceState[s.name] = { backoffUntil: 0 };
+      }
     });
   }
 
@@ -255,20 +390,31 @@ export class TrackerDO {
     // regardless of visitor count. envelope includes ageMs / stale /
     // backoffUntil so the UI can show a "data delayed" state during a 429.
     if (url.pathname === "/live") {
+      // backoffUntil is surfaced to the browser ONLY when EVERY source is
+      // currently in backoff (= upstream truly delayed). If even one source
+      // responded this cycle, the snapshot is fresh and the UI should stay
+      // green — that's the point of multi-source.
+      const nowMs = Date.now();
+      const states = Object.values(this.sourceState || {});
+      const allBackedOff = states.length > 0 && states.every(s => s.backoffUntil > nowMs);
+      const minBackoffUntil = allBackedOff
+        ? Math.min(...states.map(s => s.backoffUntil))
+        : null;
       if (!this.snapshot) {
         return new Response(JSON.stringify({
           ac: [], stale: true, noData: true,
-          backoffUntil: this.backoffUntil || null,
+          sources: [], backoffUntil: minBackoffUntil,
         }), { status: 503, headers: jhdrs });
       }
-      const ageMs = Date.now() - this.snapshot.ts;
+      const ageMs = nowMs - this.snapshot.ts;
       return new Response(JSON.stringify({
         ts:           this.snapshot.ts,
         ageMs,
-        stale:        ageMs > 15000,            // ~5 missed ticks
-        bbox:         this.snapshot.bbox,       // matches BBOX_CENTER + BBOX_RADIUS_NM
+        stale:        ageMs > 15000,             // ~5 missed ticks
+        bbox:         this.snapshot.bbox,        // matches BBOX_CENTER + BBOX_RADIUS_NM
         ac:           this.snapshot.ac,
-        backoffUntil: this.backoffUntil || null,
+        sources:      this.snapshot.sources || [],   // per-source health for verification + UI
+        backoffUntil: minBackoffUntil,
       }), { headers: jhdrs });
     }
 
@@ -374,66 +520,63 @@ export class TrackerDO {
   }
 
   // ---- Polling loop ------------------------------------------------------
+  // Every 3s: poll all 3 sources in parallel, merge the results into ONE
+  // deduplicated aircraft list, store it, then run the flight logger from
+  // that single merged list. One slow source does not block the others;
+  // one failed source does not blank the snapshot.
   async alarm() {
     await this.ensureInitialized();
     try { await this.state.storage.setAlarm(Date.now() + POLL_INTERVAL_MS); } catch (e) { console.error("setAlarm:", e); }
 
-    // Honor a previous 429 backoff — skip the upstream call entirely.
-    // /live keeps serving the last good snapshot to browsers with stale=true
-    // and backoffUntil set, so the UI can show a "delayed" state instead of
-    // frozen positions that look live.
-    if (this.backoffUntil && Date.now() < this.backoffUntil) {
+    // Skip the entire alarm only if EVERY source is in backoff. With multiple
+    // sources this should be extremely rare — if any one source is healthy
+    // the merge still has data and the downstream flow runs normally.
+    const nowMs = Date.now();
+    const states = Object.values(this.sourceState || {});
+    if (states.length > 0 && states.every(s => s.backoffUntil > nowMs)) {
       return;
     }
 
     try {
-      const res = await fetchAdsb(this.env,
-        `/v2/lat/${BBOX_CENTER.lat}/lon/${BBOX_CENTER.lon}/dist/${BBOX_RADIUS_NM}`);
+      // Parallel fetch of all sources. Promise.allSettled so one failure
+      // doesn't tank the others. pollSource() never throws — it returns a
+      // tagged result either way.
+      const settled = await Promise.allSettled(
+        SOURCES.map(src => pollSource(src, this.sourceState))
+      );
+      const perSource = settled.map((s, i) =>
+        s.status === "fulfilled"
+          ? s.value
+          : { name: SOURCES[i].name, status: "rejected", error: String(s.reason) }
+      );
+      const okResults = perSource.filter(r => r.status === "ok");
+      const mergedAc  = mergeAircraft(okResults);
 
-      // Upstream rate-limit handling — read Retry-After (numeric seconds OR
-      // HTTP-date), set backoffUntil, skip processing. Defaults to 30s when
-      // no header is provided. Capped at 5 minutes so a bad header can't
-      // strand us silently for hours.
-      if (res.status === 429) {
-        const ra = res.headers.get("Retry-After");
-        let backoffMs = 30000;
-        if (ra) {
-          const sec = parseInt(ra, 10);
-          if (Number.isFinite(sec) && sec > 0) {
-            backoffMs = Math.min(sec * 1000, 300000);
-          } else {
-            const t = Date.parse(ra);
-            if (Number.isFinite(t)) backoffMs = Math.max(1000, Math.min(t - Date.now(), 300000));
-          }
-        }
-        this.backoffUntil = Date.now() + backoffMs;
-        await this.state.storage.put("backoffUntil", this.backoffUntil);
-        console.warn(`adsb.lol 429 — backing off ${backoffMs}ms`);
-        return;
-      }
-      if (!res.ok) { console.warn(`feed not ok: ${res.status}`); return; }
+      // Persist per-source backoff state (pollSource mutated it on 429s).
+      await this.state.storage.put("sourceState", this.sourceState);
 
-      const data = await res.json();
-
-      // Store the snapshot in BOTH places: in-memory for instant /live reads,
-      // Durable Storage for cold-start / re-deploy resilience. Single key,
-      // overwrite — never appends, so this doesn't accumulate.
+      // Store snapshot + per-source health for /live consumers + verification.
       this.snapshot = {
-        ts:   Date.now(),
-        bbox: { lat: BBOX_CENTER.lat, lon: BBOX_CENTER.lon, radius: BBOX_RADIUS_NM },
-        ac:   data.ac || [],
+        ts:      Date.now(),
+        bbox:    { lat: BBOX_CENTER.lat, lon: BBOX_CENTER.lon, radius: BBOX_RADIUS_NM },
+        ac:      mergedAc,
+        sources: perSource.map(r => ({
+          name:      r.name,
+          status:    r.status,
+          count:     r.count     != null ? r.count     : 0,
+          backoffMs: r.backoffMs || null,
+          error:     r.error     || null,
+        })),
       };
       await this.state.storage.put("snapshot", this.snapshot);
 
-      // Clear any prior backoff state on a successful poll.
-      if (this.backoffUntil) {
-        this.backoffUntil = 0;
-        await this.state.storage.put("backoffUntil", 0);
-      }
-
-      // Existing flight-state processing — unchanged.
+      // Flight logger — ONE call per fleet aircraft per tick, from the SINGLE
+      // merged list. Calling processAircraft once per source would break the
+      // hysteresis state machine (audit §8-E). Building byReg from mergedAc
+      // means each fleet aircraft is seen exactly once per tick, with all
+      // its fields backfilled from whichever source had them.
       const byReg = Object.create(null);
-      for (const ac of (data.ac || [])) {
+      for (const ac of mergedAc) {
         if (ac.r) byReg[ac.r.toUpperCase()] = ac;
       }
       const now = Date.now();
@@ -537,7 +680,25 @@ export class TrackerDO {
         const newMaxSpd = Math.max(f.max_speed_kt || 0, gs  || 0);
         let newDist     = f.distance_nm || 0;
         if (stateRow && stateRow.last_lat != null && stateRow.last_lon != null) {
-          newDist += haversineNm(stateRow.last_lat, stateRow.last_lon, lat, lon);
+          // Server-side outlier filter — mirrors the browser's
+          // ingestFleetSample() logic so source-jitter from multiple ADS-B
+          // feeds can't silently inflate distance_nm. Cap: max(prev gs,
+          // new gs, 200kt) × 1.6, scaled by elapsed time, with 0.25nm
+          // minimum slack to absorb noise on slow / hovering aircraft.
+          // We only gate the DISTANCE accumulation — the position itself is
+          // still accepted into aircraft_state so the hysteresis state
+          // machine doesn't lose its sample.
+          const dtSec = Math.max(0, (now - (stateRow.last_seen || now)) / 1000);
+          if (dtSec > 0) {
+            const obsNm = haversineNm(stateRow.last_lat, stateRow.last_lon, lat, lon);
+            const capKt = Math.max(stateRow.last_gs || 0, gs || 0, 200) * 1.6;
+            const maxNm = Math.max((capKt * dtSec) / 3600, 0.25);
+            if (obsNm <= maxNm) {
+              newDist += obsNm;
+            } else {
+              console.warn(`[outlier-skip-dist] ${reg}: ${obsNm.toFixed(2)}nm in ${dtSec.toFixed(1)}s`);
+            }
+          }
         }
         await this.env.DB.prepare(
           `UPDATE flights SET max_alt_ft = ?, max_speed_kt = ?, distance_nm = ?, point_count = point_count + 1 WHERE id = ?`
