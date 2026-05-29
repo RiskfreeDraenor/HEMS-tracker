@@ -16,3 +16,9 @@ desktop.ini
 # Code still reads them from disk for in-session context.
 HANDOFF.md
 CLAUDE.md
+
+# Local-only data dumps — not source. airports.sql is the generated
+# populate-airports.mjs byproduct (~2.7 MB OurAirports dump); adsbapi.json
+# is a downloaded copy of the adsb.lol OpenAPI spec, kept for reference.
+airports.sql
+adsbapi.json
