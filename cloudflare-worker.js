@@ -384,8 +384,15 @@ export class TrackerDO {
   }
 
   async ensureAlarm() {
+    // Re-arm if there's NO alarm, or if the alarm is overdue (set in the past
+    // but never fired — the DO was evicted and the runtime stranded it). The
+    // old null-only check could never recover a stranded alarm, so once the 3s
+    // poll stalled it stayed dead until a real visitor loaded the site. The
+    // per-minute cron heartbeat calls this on every wake, so recovery is <=1 min.
     const current = await this.state.storage.getAlarm();
-    if (current == null) await this.state.storage.setAlarm(Date.now() + 100);
+    if (current == null || current <= Date.now()) {
+      await this.state.storage.setAlarm(Date.now() + 100);
+    }
   }
 
   // ---- HTTP endpoints ----------------------------------------------------
@@ -395,6 +402,20 @@ export class TrackerDO {
 
     const url   = new URL(request.url);
     const jhdrs = { ...corsHeaders(), "Content-Type": "application/json", "Cache-Control": "no-store" };
+
+    // Cron heartbeat (fires every minute via scheduled()). ensureAlarm() above
+    // already re-armed a missing/overdue 3s alarm. As a belt-and-suspenders, if
+    // polling has clearly stalled (snapshot missing or >30s stale), run ONE
+    // catch-up poll right now so flight logging resumes within a minute even if
+    // the runtime isn't firing the idle alarm reliably. No-op when healthy (the
+    // 3s alarm keeps the snapshot fresh).
+    if (url.pathname === "/log/heartbeat") {
+      const age = this.snapshot ? Date.now() - this.snapshot.ts : Infinity;
+      if (age > 30000) {
+        try { await this.alarm(); } catch (e) { console.error("heartbeat catch-up poll failed:", e); }
+      }
+      return new Response("ok", { headers: { "Content-Type": "text/plain", ...corsHeaders() } });
+    }
 
     // Shared live snapshot — served from the DO's in-memory + Durable Storage
     // copy of the most recent successful upstream poll. Every browser hits
@@ -537,8 +558,11 @@ export class TrackerDO {
   // that single merged list. One slow source does not block the others;
   // one failed source does not blank the snapshot.
   async alarm() {
-    await this.ensureInitialized();
+    // Reschedule the next tick FIRST — before anything that could throw (e.g.
+    // ensureInitialized hitting a transient D1 error) — so a failure in this
+    // cycle can never break the polling chain.
     try { await this.state.storage.setAlarm(Date.now() + POLL_INTERVAL_MS); } catch (e) { console.error("setAlarm:", e); }
+    await this.ensureInitialized();
 
     // Skip the entire alarm only if EVERY source is in backoff. With multiple
     // sources this should be extremely rare — if any one source is healthy
