@@ -562,7 +562,12 @@ export class TrackerDO {
     // ensureInitialized hitting a transient D1 error) — so a failure in this
     // cycle can never break the polling chain.
     try { await this.state.storage.setAlarm(Date.now() + POLL_INTERVAL_MS); } catch (e) { console.error("setAlarm:", e); }
-    await this.ensureInitialized();
+    // Guard ensureInitialized too: if it throws (e.g. a transient D1 error after
+    // the DO is recycled), Durable Object output gating rolls back this run's
+    // storage writes — INCLUDING the setAlarm above — silently killing the poll
+    // loop until a request wakes the DO. Swallow it so alarm() always completes
+    // and the next tick is always scheduled.
+    try { await this.ensureInitialized(); } catch (e) { console.error("ensureInitialized:", e); }
 
     // Skip the entire alarm only if EVERY source is in backoff. With multiple
     // sources this should be extremely rare — if any one source is healthy

@@ -1,0 +1,39 @@
+name: Keep tracker DO alive
+
+# Pings the worker's /log/heartbeat so the TrackerDO's 3-second flight-logging
+# poll stays alive even when nobody has hemsnj.com open. Cloudflare's own cron
+# trigger + DO alarm proved unreliable when the object goes idle (it polled only
+# while the site was being watched, missing whole flights — see HANDOFF 7-D).
+# This wakes it from OUTSIDE Cloudflare so it can't be killed by CF-internal
+# scheduling flakiness. Public repo => Actions minutes are free.
+#
+# GitHub's minimum schedule granularity is 5 min and runs are best-effort
+# (can be delayed/skipped under load), so each run self-pings ~once a minute for
+# ~5 min to approximate continuous 1-minute coverage. NOTE: GitHub disables
+# scheduled workflows after 60 days with no repo commits — this repo is active,
+# but if logging ever goes quiet again, check the Actions tab first.
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"   # every 5 minutes (GitHub minimum)
+  workflow_dispatch: {}      # manual "Run workflow" button in the Actions tab
+
+permissions: {}              # no repo permissions needed — it only makes an outbound curl
+
+concurrency:
+  group: keepalive
+  cancel-in-progress: false
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - name: Ping heartbeat ~every minute for ~5 min
+        run: |
+          URL="https://hemstracker.deltasteelfox92.workers.dev/log/heartbeat"
+          for i in $(seq 1 5); do
+            code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$URL" || echo ERR)
+            echo "ping $i -> $code @ $(date -u +%H:%M:%S)Z"
+            [ "$i" -lt 5 ] && sleep 58
+          done
