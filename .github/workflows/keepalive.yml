@@ -35,5 +35,6 @@ jobs:
           for i in $(seq 1 5); do
             code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 20 "$URL" || echo ERR)
             echo "ping $i -> $code @ $(date -u +%H:%M:%S)Z"
-            [ "$i" -lt 5 ] && sleep 58
+            if [ "$i" -lt 5 ]; then sleep 58; fi
           done
+          echo "done - 5 pings sent"
