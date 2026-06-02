@@ -609,7 +609,18 @@ export class TrackerDO {
           error:     r.error     || null,
         })),
       };
-      await this.state.storage.put("snapshot", this.snapshot);
+      // Persist for cold-start resilience — but NEVER let it abort the alarm.
+      // DO storage caps each value at 128 KB; during heavy daytime traffic the
+      // snapshot (400+ aircraft ≈ 300 KB) exceeds that and put() throws.
+      // Unguarded, that throw aborted the alarm BEFORE the flight-logging loop,
+      // silently freezing ALL history while live polling (the in-memory
+      // snapshot, set above) kept working. Logging is the priority; persistence
+      // is optional, so swallow the error and move on.
+      try {
+        await this.state.storage.put("snapshot", this.snapshot);
+      } catch (e) {
+        console.error("snapshot persist skipped (likely >128KB DO-storage limit):", e && e.message ? e.message : e);
+      }
 
       // Flight logger — ONE call per fleet aircraft per tick, from the SINGLE
       // merged list. Calling processAircraft once per source would break the
@@ -618,11 +629,20 @@ export class TrackerDO {
       // its fields backfilled from whichever source had them.
       const byReg = Object.create(null);
       for (const ac of mergedAc) {
-        if (ac.r) byReg[ac.r.toUpperCase()] = ac;
+        if (typeof ac.r === "string" && ac.r) byReg[ac.r.toUpperCase()] = ac;
       }
       const now = Date.now();
       for (const reg of FLEET_REGS) {
-        await this.processAircraft(reg, byReg[reg.toUpperCase()], now);
+        // Per-reg guard: one aircraft throwing must NOT abort logging for the
+        // whole fleet. Previously this loop had no inner try/catch, so a single
+        // record that threw aborted before ANY aircraft's state was written —
+        // freezing all flight logging while live polling kept working. The
+        // console.error surfaces exactly which reg + why in the worker logs.
+        try {
+          await this.processAircraft(reg, byReg[reg.toUpperCase()], now);
+        } catch (e) {
+          console.error("processAircraft failed for " + reg + ":", (e && e.stack) || e);
+        }
       }
     } catch (e) {
       console.error("alarm cycle failed:", e);
@@ -681,7 +701,7 @@ export class TrackerDO {
       currentFlightId = `${reg}-${candidateFirstTime}`;
       const airport = await this.findNearestAirport(candidateFirstLat, candidateFirstLon);
       await this.env.DB.prepare(
-        `INSERT INTO flights (id, reg, takeoff_time, takeoff_lat, takeoff_lon, max_alt_ft, max_speed_kt, airport_takeoff)
+        `INSERT OR IGNORE INTO flights (id, reg, takeoff_time, takeoff_lat, takeoff_lon, max_alt_ft, max_speed_kt, airport_takeoff)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
       ).bind(
         currentFlightId, reg, candidateFirstTime, candidateFirstLat, candidateFirstLon,
