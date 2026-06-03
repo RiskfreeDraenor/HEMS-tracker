@@ -104,7 +104,7 @@ const FLEET = [
     color:        "#FF8A4C",                  // NJ State Police STAR — orange
     kind:         "helicopter",
     company:      "STAR",
-    base: { lat: 39.7939, lon: -74.2232, name: "200 Volunteer Way, Waretown, NJ 08758 (approx — exact addr not in OSM)" },
+    base: { lat: 39.799333, lon: -74.2055, name: "Ocean County Fire & EMS Training Center" },
   },
   {
     registration: "N5NJ",
@@ -675,11 +675,12 @@ const SETTINGS = {
   /* Scrolling is owned by the parent container now (.ov-flights-scroll) — the
      list itself just renders rows and grows naturally to fit the content. */
   .flight-log { list-style: none; margin: 0; padding: 0; }
-  .flight-row { padding: 8px 10px; border-left: 3px solid var(--ac-color, var(--c-fleet)); border-bottom: 1px solid var(--c-border); cursor: pointer; transition: background .12s ease; }
+  .flight-row { padding: 8px 10px; background: var(--mission-tint, transparent); border-left: 3px solid var(--ac-color, var(--c-fleet)); border-bottom: 1px solid var(--c-border); cursor: pointer; transition: background .12s ease; }
+  .flight-row.mission-first { margin-top: 6px; }                      /* gap between consecutive missions */
+  .flight-date-header + .flight-row.mission-first { margin-top: 0; }  /* but not right under a date header */
   .flight-row:last-child { border-bottom: none; }
   .flight-row:hover { background: var(--c-surface); }
-  .flight-row.active { background: var(--c-surface-2); }
-  .flight-row.active::after { content: "▸ TRACK"; float: right; font-size: 9px; letter-spacing: .15em; color: var(--ac-color); margin-left: 8px; }
+  .flight-row.mission-active { background: var(--c-surface-2); }      /* whole selected mission highlights */
   .flight-row.airborne .flight-call::before { content: "● "; color: var(--c-ok); }
   .flight-top { display: flex; align-items: baseline; justify-content: space-between; margin-bottom: 3px; }
   .flight-call { font-weight: 600; font-size: 11px; letter-spacing: .04em; color: var(--ac-color); }
@@ -1023,7 +1024,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0069</div>
+  <div id="version">v.0070</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -2190,12 +2191,96 @@ function resetHistoryView(){
   if (range) range.textContent = "";
 }
 
+/* ===== MISSION GROUPING (frontend-only, v.0070) =====================
+   A "mission" = a maximal run of an aircraft's consecutive flights that
+   lifts off from its home base and lands back at base (base → scene →
+   hospital → … → base). Legs in between are shaded together in the list,
+   and clicking any leg draws the whole sortie on the map. Computed live
+   from each flight's endpoint coords + the known FLEET base — no worker
+   or D1 change. */
+const BASE_MATCH_NM = 2.5;   // "at base" tolerance — matches AIRPORT_MAX_NM / resolveLocation
+
+function nearBase(cfg, lat, lon){
+  return !!(cfg && cfg.base
+    && Number.isFinite(lat) && Number.isFinite(lon)
+    && Number.isFinite(cfg.base.lat) && Number.isFinite(cfg.base.lon)
+    && distanceNm(cfg.base.lat, cfg.base.lon, lat, lon) <= BASE_MATCH_NM);
+}
+
+// Tag each flight with a 0-based mission index. `flights` arrives newest-first
+// (API order); we walk it chronologically to assign. A mission opens at the
+// first leg and re-opens whenever a leg departs base; it closes when a leg
+// lands back at base. Returns { missionByFlightId, legsByMission }.
+function groupMissions(cfg, flights){
+  const chrono = [...flights].reverse();
+  const missionByFlightId = new Map();
+  const legsByMission = new Map();
+  let idx = -1, open = false;
+  for (const f of chrono){
+    const startsBase = nearBase(cfg, f.takeoff_lat, f.takeoff_lon);
+    const endsBase   = f.landing_time != null && nearBase(cfg, f.landing_lat, f.landing_lon);
+    if (!open){ idx++; open = true; }       // first leg of a new mission
+    else if (startsBase){ idx++; }          // prior mission never returned to base → start fresh
+    missionByFlightId.set(String(f.id), idx);
+    if (!legsByMission.has(idx)) legsByMission.set(idx, []);
+    legsByMission.get(idx).push(f);
+    if (endsBase) open = false;             // landed at base → mission complete
+  }
+  return { missionByFlightId, legsByMission };
+}
+
+// #rrggbb → {h, s(0-100), l(0-100)} so we can derive shades of the company color.
+function hexToHsl(hex){
+  let h = String(hex || "").replace("#","").trim();
+  if (h.length === 3) h = h.split("").map(c => c + c).join("");
+  const r = parseInt(h.slice(0,2),16)/255, g = parseInt(h.slice(2,4),16)/255, b = parseInt(h.slice(4,6),16)/255;
+  const mx = Math.max(r,g,b), mn = Math.min(r,g,b), d = mx - mn;
+  let hue = 0;
+  if (d){
+    if (mx === r) hue = ((g - b) / d) % 6;
+    else if (mx === g) hue = (b - r) / d + 2;
+    else hue = (r - g) / d + 4;
+    hue *= 60; if (hue < 0) hue += 360;
+  }
+  const l = (mx + mn) / 2;
+  const s = d ? d / (1 - Math.abs(2*l - 1)) : 0;
+  return { h: hue, s: s*100, l: l*100 };
+}
+
+// Per-mission shade of the company color. Consecutive missions alternate
+// lightness (dark base → lighter, light base → darker) so boundaries read
+// clearly with no header. Returns a solid color + a faint row-tint.
+function missionShade(hex, idx){
+  const { h, s, l } = hexToHsl(hex);
+  const L = (idx % 2 === 0) ? l : (l > 60 ? Math.max(28, l - 18) : Math.min(86, l + 18));
+  const base = `${h.toFixed(0)} ${s.toFixed(0)}% ${L.toFixed(0)}%`;
+  return { solid: `hsl(${base})`, tint: `hsl(${base} / 0.13)` };
+}
+
 function renderHistoryFlightList(reg, cfg, flights){
   const list = document.getElementById("ov-flight-list");
   if (!list) return;
   if (!flights || flights.length === 0) {
     list.innerHTML = `<li class="history-empty">No flights logged for ${cfg.label} yet</li>`;
     return;
+  }
+  // Tag every flight with its mission index. A mission is only "anchored" (and
+  // therefore painted) if at least one of its legs touches the home base — i.e.
+  // we can actually tie it to a base departure or return. Runs that never touch
+  // base (e.g. an aircraft operating away from its configured base, like N3NJ)
+  // are left in the plain company color, NOT painted as a mission.
+  const { missionByFlightId, legsByMission } = groupMissions(cfg, flights);
+  const baseColor = cfg.color || "#FFB800";
+  const flightById = new Map(flights.map(f => [String(f.id), f]));
+  const anchoredOf = new Map();   // mission idx -> base-anchored?
+  const shadeOrdOf = new Map();   // mission idx -> ordinal among anchored missions (drives alternating shade)
+  let ord = 0;
+  for (const [mi, legs] of legsByMission) {
+    const anchored = legs.some(f =>
+      nearBase(cfg, f.takeoff_lat, f.takeoff_lon) ||
+      (f.landing_time != null && nearBase(cfg, f.landing_lat, f.landing_lon)));
+    anchoredOf.set(mi, anchored);
+    if (anchored) shadeOrdOf.set(mi, ord++);
   }
   // Group by local date — newest first since the API returns flights newest first.
   const groups = new Map();
@@ -2205,11 +2290,25 @@ function renderHistoryFlightList(reg, cfg, flights){
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(f);
   }
-  const color = cfg.color || "#FFB800";
   const html = [];
+  let prevMidx = null;
   for (const [date, group] of groups) {
     html.push(`<li class="flight-date-header">${date}</li>`);
     for (const f of group) {
+      const mIdx = missionByFlightId.get(String(f.id)) ?? 0;
+      const anchored = anchoredOf.get(mIdx);
+      // Anchored → shade of the company color (+ faint row tint) with a gap
+      // between missions. Unanchored → plain company color, no tint, no gap.
+      let styleDecl, firstCls;
+      if (anchored) {
+        const sh = missionShade(baseColor, shadeOrdOf.get(mIdx));
+        styleDecl = `--ac-color:${sh.solid}; --mission-tint:${sh.tint}`;
+        firstCls  = (mIdx !== prevMidx) ? " mission-first" : "";
+      } else {
+        styleDecl = `--ac-color:${baseColor}`;
+        firstCls  = "";
+      }
+      prevMidx = mIdx;
       const takeoff = new Date(f.takeoff_time);
       const timeStr = takeoff.toLocaleTimeString("en-US", { hour:"2-digit", minute:"2-digit", hour12:false });
       const airborne = f.landing_time == null;
@@ -2222,7 +2321,7 @@ function renderHistoryFlightList(reg, cfg, flights){
       const routeLine = (fromLoc || toLoc) || airborne
         ? `<div class="flight-route">${fromLoc || "scene"} → ${airborne ? "…" : (toLoc || "scene")}</div>`
         : "";
-      html.push(`<li class="flight-row ${airborne?"airborne":""}" data-flight-id="${f.id}" style="--ac-color:${color}">
+      html.push(`<li class="flight-row ${airborne?"airborne":""}${firstCls}" data-flight-id="${f.id}" data-mission="${mIdx}" data-anchored="${anchored ? 1 : 0}" style="${styleDecl}">
         <div class="flight-top"><span class="flight-call">${timeStr}</span><span class="flight-time">${duration}</span></div>
         ${routeLine}
         <div class="flight-stats"><span>ALT <b>${maxAlt}</b></span><span>SPD <b>${maxSpd}</b></span><span>DIST <b>${dist}</b></span></div>
@@ -2230,40 +2329,68 @@ function renderHistoryFlightList(reg, cfg, flights){
     }
   }
   list.innerHTML = html.join("");
-  // Index flights by id for the click handler
-  const flightsById = new Map(flights.map(f => [String(f.id), f]));
+  // Click behavior: an anchored mission draws the WHOLE sortie (all legs) in its
+  // shade and highlights every row; an unanchored flight just draws itself in
+  // the normal company color.
   list.querySelectorAll(".flight-row").forEach(row => {
     row.addEventListener("click", () => {
-      list.querySelectorAll(".flight-row").forEach(r => r.classList.remove("active"));
-      row.classList.add("active");
-      const f = flightsById.get(row.dataset.flightId);
-      if (f) selectHistoryFlight(f, cfg);
+      const mIdx = Number(row.dataset.mission);
+      const anchored = row.dataset.anchored === "1";
+      list.querySelectorAll(".flight-row").forEach(r => r.classList.remove("mission-active"));
+      if (anchored) {
+        list.querySelectorAll(`.flight-row[data-mission="${mIdx}"][data-anchored="1"]`)
+          .forEach(r => r.classList.add("mission-active"));
+        selectHistoryMission(legsByMission.get(mIdx) || [], cfg, missionShade(baseColor, shadeOrdOf.get(mIdx)).solid);
+      } else {
+        row.classList.add("mission-active");
+        const f = flightById.get(row.dataset.flightId);
+        if (f) selectHistoryMission([f], cfg, baseColor);
+      }
     });
   });
 }
 
-async function selectHistoryFlight(flight, cfg){
-  historyState.selectedFlight = flight;
-  const color = cfg.color || "#FFB800";
+async function selectHistoryMission(legs, cfg, color){
+  if (!legs || !legs.length) return;
+  const ordered = [...legs].sort((a, b) => a.takeoff_time - b.takeoff_time);  // chronological
+  historyState.selectedFlight = ordered[ordered.length - 1];
+  const shade = color || cfg.color || "#FFB800";
 
-  // ----- Stats strip -----
-  const airborne = flight.landing_time == null;
+  // ----- Aggregate stats across all legs -----
+  const first = ordered[0], last = ordered[ordered.length - 1];
+  const airborne = last.landing_time == null;
+  const totalSec = airborne ? null : Math.max(0, Math.round((last.landing_time - first.takeoff_time) / 1000));
   const durationStr = airborne ? "AIRBORNE"
-    : (flight.duration_sec ? `${Math.floor(flight.duration_sec/60)}m ${flight.duration_sec%60}s` : "—");
-  const maxAltStr = flight.max_alt_ft   ? `${Math.round(flight.max_alt_ft).toLocaleString()} ft`   : "—";
-  const maxSpdStr = flight.max_speed_kt ? `${Math.round(flight.max_speed_kt)} kt`                  : "—";
-  const distStr   = (flight.distance_nm != null && flight.distance_nm > 0)
-    ? `${flight.distance_nm.toFixed(1)} nm` : "—";
-  const fromLoc = resolveLocation(flight.takeoff_lat, flight.takeoff_lon, flight.airport_takeoff);
-  const toLoc   = airborne ? null : resolveLocation(flight.landing_lat, flight.landing_lon, flight.airport_landing);
+    : (totalSec ? `${Math.floor(totalSec/60)}m ${totalSec%60}s` : "—");
+  const totalDist = ordered.reduce((a, f) => a + (f.distance_nm || 0), 0);
+  const distStr   = totalDist > 0 ? `${totalDist.toFixed(1)} nm` : "—";
+  const maxAlt    = ordered.reduce((a, f) => Math.max(a, f.max_alt_ft   || 0), 0);
+  const maxSpd    = ordered.reduce((a, f) => Math.max(a, f.max_speed_kt || 0), 0);
+  const maxAltStr = maxAlt ? `${Math.round(maxAlt).toLocaleString()} ft` : "—";
+  const maxSpdStr = maxSpd ? `${Math.round(maxSpd)} kt` : "—";
+
+  // Route chain — the aircraft's own base is shown as "Base", never an address.
+  const labelAt = (lat, lon, ap) => nearBase(cfg, lat, lon) ? "Base" : (resolveLocation(lat, lon, ap) || "scene");
+  const stops = [];
+  for (const f of ordered){
+    const from = labelAt(f.takeoff_lat, f.takeoff_lon, f.airport_takeoff);
+    if (!stops.length || stops[stops.length - 1] !== from) stops.push(from);
+    const to = (f.landing_time != null) ? labelAt(f.landing_lat, f.landing_lon, f.airport_landing) : "…";
+    if (stops[stops.length - 1] !== to) stops.push(to);
+  }
+  const routeHtml = stops.map(s => `<span class="val accent" style="color:${shade}">${s}</span>`).join(`<span class="arrow">→</span>`);
+  // Only call it a "mission" when it's tied to base; loose flights stay "FLIGHT".
+  const anchored = ordered.some(f =>
+    nearBase(cfg, f.takeoff_lat, f.takeoff_lon) ||
+    (f.landing_time != null && nearBase(cfg, f.landing_lat, f.landing_lon)));
+  const kindLabel = anchored ? "MISSION" : "FLIGHT";
+  const legLabel = ordered.length === 1 ? "1 leg" : `${ordered.length} legs`;
+
   const stats = document.getElementById("ov-stats");
   if (stats) {
     stats.innerHTML = `
-      <div class="ov-route" style="--ac-color:${color}">
-        <span class="val accent" style="color:${color}">${fromLoc || "scene"}</span>
-        <span class="arrow">→</span>
-        <span class="val accent" style="color:${color}">${airborne ? "…" : (toLoc || "scene")}</span>
-      </div>
+      <div class="ov-route" style="--ac-color:${shade}">${routeHtml}</div>
+      <div class="ov-stat"><span class="lbl">${kindLabel}</span><span class="val">${legLabel}</span></div>
       <div class="ov-stat"><span class="lbl">DURATION</span><span class="val">${durationStr}</span></div>
       <div class="ov-stat"><span class="lbl">DISTANCE</span><span class="val">${distStr}</span></div>
       <div class="ov-stat"><span class="lbl">MAX ALT</span><span class="val">${maxAltStr}</span></div>
@@ -2271,32 +2398,43 @@ async function selectHistoryFlight(flight, cfg){
     `;
   }
 
-  // ----- Fetch track points and draw -----
+  // ----- Draw every leg on the map -----
   initHistoryMap();
-  // Ensure Leaflet recomputes size now that the container is visible.
   setTimeout(() => historyState.map && historyState.map.invalidateSize(), 0);
   if (historyState.trackLayer) historyState.trackLayer.clearLayers();
 
-  const points = await fetchTrackPoints(flight.id);
-  const latlngs = points
-    .map(p => [p.lat, p.lon])
-    .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+  const legPoints = await Promise.all(ordered.map(f => fetchTrackPoints(f.id)));
+  const allLatLngs = [];
+  legPoints.forEach((points, li) => {
+    const latlngs = points
+      .map(p => [p.lat, p.lon])
+      .filter(p => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+    if (!latlngs.length) return;
+    L.polyline(latlngs, { color: shade, weight: 3, opacity: 0.95 }).addTo(historyState.trackLayer);
+    // small "stop" dot at the end of each leg except the last (scene / hospital)
+    if (li < legPoints.length - 1) {
+      L.circleMarker(latlngs[latlngs.length - 1], { radius: 4, color: shade, fillColor: "#0a0e1a", fillOpacity: 1, weight: 2 })
+        .addTo(historyState.trackLayer).bindPopup("Stop");
+    }
+    allLatLngs.push(...latlngs);
+  });
 
-  if (latlngs.length >= 2) {
-    L.polyline(latlngs, { color, weight: 3, opacity: 0.95 }).addTo(historyState.trackLayer);
-    L.circleMarker(latlngs[0], { radius: 6, color, fillColor: "#0a0e1a", fillOpacity: 1, weight: 2 })
+  if (allLatLngs.length >= 2) {
+    const start = allLatLngs[0], end = allLatLngs[allLatLngs.length - 1];
+    L.circleMarker(start, { radius: 6, color: shade, fillColor: "#0a0e1a", fillOpacity: 1, weight: 2 })
       .addTo(historyState.trackLayer).bindPopup("Takeoff");
-    L.circleMarker(latlngs[latlngs.length - 1], { radius: 6, color, fillColor: color, fillOpacity: 1, weight: 2 })
-      .addTo(historyState.trackLayer).bindPopup("Landing");
-    historyState.map.fitBounds(L.latLngBounds(latlngs), { padding: [40, 40] });
-  } else if (latlngs.length === 1) {
-    historyState.map.setView(latlngs[0], 13);
-    L.circleMarker(latlngs[0], { radius: 6, color, fillColor: color, fillOpacity: 1, weight: 2 })
-      .addTo(historyState.trackLayer);
+    L.circleMarker(end, { radius: 6, color: shade, fillColor: shade, fillOpacity: 1, weight: 2 })
+      .addTo(historyState.trackLayer).bindPopup(airborne ? "Airborne" : "Landing");
+    historyState.map.fitBounds(L.latLngBounds(allLatLngs), { padding: [40, 40] });
+  } else if (allLatLngs.length === 1) {
+    historyState.map.setView(allLatLngs[0], 13);
+    L.circleMarker(allLatLngs[0], { radius: 6, color: shade, fillColor: shade, fillOpacity: 1, weight: 2 })
+      .addTo(historyState.trackLayer).bindPopup(airborne ? "Airborne" : "Landing");
   }
 
-  // ----- Altitude chart -----
-  renderAltChart(points, color);
+  // ----- Altitude profile across the whole mission -----
+  const allPoints = legPoints.flat().filter(p => Number.isFinite(p.t)).sort((a, b) => a.t - b.t);
+  renderAltChart(allPoints, shade);
 }
 
 function renderAltChart(points, color){
