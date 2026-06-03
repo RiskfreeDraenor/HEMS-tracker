@@ -1024,7 +1024,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0070</div>
+  <div id="version">v.0071</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -2247,13 +2247,19 @@ function hexToHsl(hex){
   return { h: hue, s: s*100, l: l*100 };
 }
 
-// Per-mission shade of the company color. Consecutive missions alternate
-// lightness (dark base → lighter, light base → darker) so boundaries read
-// clearly with no header. Returns a solid color + a faint row-tint.
+// Per-mission shade of the company color. Even missions use the company color
+// as-is; odd missions get a STRONGLY contrasting shade of the same hue — much
+// lighter + paler for dark/mid base colors, much darker for light ones — so
+// adjacent missions are easy to tell apart (a ±18 step was too subtle for
+// Hackensack blue / Cooper teal). Returns a solid color + a faint row-tint.
 function missionShade(hex, idx){
   const { h, s, l } = hexToHsl(hex);
-  const L = (idx % 2 === 0) ? l : (l > 60 ? Math.max(28, l - 18) : Math.min(86, l + 18));
-  const base = `${h.toFixed(0)} ${s.toFixed(0)}% ${L.toFixed(0)}%`;
+  let S = s, L = l;
+  if (idx % 2 === 1) {
+    if (l < 66) { L = Math.min(90, l + 36); S = s * 0.5; }   // dark/mid base → much lighter + paler
+    else        { L = Math.max(42, l - 34); S = s; }          // light base → much darker
+  }
+  const base = `${h.toFixed(0)} ${S.toFixed(0)}% ${L.toFixed(0)}%`;
   return { solid: `hsl(${base})`, tint: `hsl(${base} / 0.13)` };
 }
 
