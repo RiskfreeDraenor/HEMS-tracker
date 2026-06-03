@@ -363,6 +363,14 @@ const SETTINGS = {
     font-family: var(--f-mono); font-size: 12px; letter-spacing: .15em; padding: 6px 12px; cursor: pointer;
   }
   .ov-close-btn:hover { background: var(--c-surface-2); border-color: var(--c-warn); color: var(--c-warn); }
+  /* Mobile-only HISTORY drawer controls — hidden on desktop, shown in the ≤800px block below. */
+  .ov-bar-lead { display: flex; align-items: center; min-width: 0; }
+  .ov-menu-btn, .ov-back-btn, .ov-backdrop { display: none; }
+  .ov-menu-btn {
+    background: var(--c-surface); border: 1px solid var(--c-border-2); color: var(--c-text);
+    font-size: 15px; line-height: 1; padding: 5px 9px; margin-right: 12px; cursor: pointer;
+  }
+  .ov-menu-btn:hover { border-color: var(--c-fleet); color: var(--c-fleet); }
 
   /* LEFT column — flights list takes the entire vertical space */
   .ov-flights {
@@ -543,13 +551,39 @@ const SETTINGS = {
     }
     /* HISTORY overlay stacks vertically on phones: bar → fleet picker (compact)
        → flights list → main (map + chart). */
+    /* HISTORY on phones: the map/detail is the full canvas; the aircraft picker
+       and flights list live in a slide-in LEFT drawer that works like a folder —
+       aircraft list ↔ that aircraft's flights (← back). */
     #history-overlay {
       grid-template-columns: 1fr;
-      grid-template-rows: 48px auto 32vh 1fr;
-      grid-template-areas: "ovbar" "ovfleet" "ovflights" "ovmain";
+      grid-template-rows: 48px 1fr;
+      grid-template-areas: "ovbar" "ovmain";
     }
-    .ov-flights { border-right: none; border-bottom: 1px solid var(--c-border); }
-    .ov-fleet   { border-left: none;  border-bottom: 1px solid var(--c-border); max-height: 28vh; }
+    .ov-bar .ov-menu-btn { display: inline-flex; align-items: center; }
+    .ov-bar .ov-sub { display: none; }
+    .ov-backdrop {
+      display: block; position: fixed; inset: 48px 0 0 0; z-index: 5;
+      background: rgba(0,0,0,.55); opacity: 0; pointer-events: none; transition: opacity .24s ease;
+    }
+    #history-overlay.drawer-open .ov-backdrop { opacity: 1; pointer-events: auto; }
+    /* both list panels share the same fixed left-drawer rect, slide via transform */
+    .ov-flights, .ov-fleet {
+      position: fixed; top: 48px; left: 0; bottom: 0; width: min(86vw, 360px); max-height: none;
+      z-index: 6; border: none; border-right: 1px solid var(--c-border);
+      box-shadow: 2px 0 22px rgba(0,0,0,.5);
+      transform: translateX(-104%); transition: transform .24s ease;
+    }
+    .ov-back-btn {
+      display: flex; align-items: center; gap: 6px; width: 100%;
+      background: var(--c-bg); border: none; border-bottom: 1px solid var(--c-border);
+      color: var(--c-fleet); font-family: var(--f-mono); font-size: 11px; letter-spacing: .15em;
+      padding: 11px 16px; cursor: pointer;
+    }
+    /* fleet level (default): aircraft list in view */
+    #history-overlay.drawer-open .ov-fleet { transform: translateX(0); }
+    /* flights level: flights in view, aircraft list slides out */
+    #history-overlay.drawer-open.level-flights .ov-fleet   { transform: translateX(-104%); }
+    #history-overlay.drawer-open.level-flights .ov-flights { transform: translateX(0); }
   }
   .btn-row { display: flex; gap: 6px; margin-top: 10px; }
   .btn { flex: 1; background: var(--c-surface); border: 1px solid var(--c-border); color: var(--c-text); font-family: var(--f-mono); font-size: 10px; letter-spacing: .15em; padding: 7px 8px; cursor: pointer; transition: all .15s ease; }
@@ -932,15 +966,20 @@ const SETTINGS = {
        fleet card's 📋 shortcut. Dedicated map + altitude chart, separate from main map. -->
   <div id="history-overlay" class="hidden">
     <header class="ov-bar">
-      <div>
+      <div class="ov-bar-lead">
+        <button class="ov-menu-btn" id="ov-menu-btn" title="Aircraft &amp; flights">☰</button>
         <span class="ov-title"><span class="mark">📋</span>FLIGHT HISTORY</span>
         <span class="ov-sub" id="ov-subtitle">— select an aircraft</span>
       </div>
       <button class="ov-close-btn" id="ov-close-btn" title="Close">✕ CLOSE</button>
     </header>
 
+    <!-- backdrop dims the map behind the mobile drawer -->
+    <div class="ov-backdrop" id="ov-backdrop"></div>
+
     <!-- LEFT column — flight history (takes full vertical space) -->
     <aside class="ov-flights">
+      <button class="ov-back-btn" id="ov-back-btn">← Aircraft</button>
       <div class="ov-flights-head" id="ov-flights-head">FLIGHTS</div>
       <div class="ov-flights-scroll">
         <ul id="ov-flight-list" class="flight-log"></ul>
@@ -1024,7 +1063,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0071</div>
+  <div id="version">v.0072</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
@@ -2179,6 +2218,8 @@ async function loadHistoryForReg(reg){
   // Fetch + render
   const flights = await fetchFlightsForReg(reg);
   renderHistoryFlightList(reg, cfg, flights);
+  // Mobile folder: tapping an aircraft drills into its flights.
+  setHistoryLevel("flights");
 }
 
 function resetHistoryView(){
@@ -2352,6 +2393,7 @@ function renderHistoryFlightList(reg, cfg, flights){
         const f = flightById.get(row.dataset.flightId);
         if (f) selectHistoryMission([f], cfg, baseColor);
       }
+      setHistoryDrawer(false);   // mobile: close the drawer to reveal the map
     });
   });
 }
@@ -2525,12 +2567,22 @@ function openHistoryOverlay(preselectReg){
     if (list) list.innerHTML = `<li class="history-empty">Pick an aircraft from the fleet list →</li>`;
     resetHistoryView();
   }
+  // Mobile: open the drawer — at the flights level if an aircraft is already
+  // chosen, otherwise at the aircraft list so the user picks one first.
+  setHistoryLevel((preselectReg || historyState.selectedReg) ? "flights" : "fleet");
+  setHistoryDrawer(true);
 }
 
 function closeHistoryOverlay(){
   const overlay = document.getElementById("history-overlay");
-  if (overlay) overlay.classList.add("hidden");
+  if (overlay) { overlay.classList.add("hidden"); overlay.classList.remove("drawer-open"); }
 }
+
+// Mobile drawer helpers — visually no-ops on desktop (the classes are only
+// styled inside the ≤800px media query). The drawer is a folder: the aircraft
+// list (level "fleet") drills into one aircraft's flights (level "flights").
+function setHistoryDrawer(open){ const ov = document.getElementById("history-overlay"); if (ov) ov.classList.toggle("drawer-open", open); }
+function setHistoryLevel(lvl){  const ov = document.getElementById("history-overlay"); if (ov) ov.classList.toggle("level-flights", lvl === "flights"); }
 
 // Per-card 📋 shortcut + topbar HISTORY button both route here.
 function showHistory(reg){ openHistoryOverlay(reg); }
@@ -2806,6 +2858,15 @@ function initUI(){
   // ===== HISTORY overlay — topbar trigger + close button. ESC also closes it. =====
   document.getElementById("history-open-btn").addEventListener("click", () => openHistoryOverlay());
   document.getElementById("ov-close-btn").addEventListener("click", closeHistoryOverlay);
+  // Mobile drawer (folder) controls inside the HISTORY overlay.
+  document.getElementById("ov-menu-btn").addEventListener("click", () => {
+    const ov = document.getElementById("history-overlay");
+    const opening = !ov.classList.contains("drawer-open");
+    if (opening) setHistoryLevel(historyState.selectedReg ? "flights" : "fleet");
+    setHistoryDrawer(opening);
+  });
+  document.getElementById("ov-back-btn").addEventListener("click", () => setHistoryLevel("fleet"));
+  document.getElementById("ov-backdrop").addEventListener("click", () => setHistoryDrawer(false));
   document.addEventListener("keydown", (e) => {
     if (e.key === "Escape") {
       const ov = document.getElementById("history-overlay");
