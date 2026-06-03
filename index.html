@@ -561,6 +561,11 @@ const SETTINGS = {
     }
     .ov-bar .ov-menu-btn { display: inline-flex; align-items: center; }
     .ov-bar .ov-sub { display: none; }
+    /* Leaflet's panes use z-index 200–800; without their own stacking context
+       they paint over the ☰ bar and the drawer. Give the bar and the map area
+       contained contexts: map (z 1) < backdrop (5) < drawer (6) < bar (10). */
+    .ov-bar  { position: relative; z-index: 10; }
+    .ov-main { position: relative; z-index: 1; }
     .ov-backdrop {
       display: block; position: fixed; inset: 48px 0 0 0; z-index: 5;
       background: rgba(0,0,0,.55); opacity: 0; pointer-events: none; transition: opacity .24s ease;
@@ -1063,7 +1068,7 @@ const SETTINGS = {
   </div>
 
   <!-- VERSION — bump before every commit -->
-  <div id="version">v.0072</div>
+  <div id="version">v.0073</div>
 
 <!-- ============================================================
      APPLICATION LOGIC — you don't need to read or edit this
