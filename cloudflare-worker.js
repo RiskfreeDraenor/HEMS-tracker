@@ -45,6 +45,7 @@ const BBOX_RADIUS_NM  = 150;
 
 /* ---- State machine knobs ------------------------------------------------- */
 const POLL_INTERVAL_MS     = 3000;
+const PERSIST_INTERVAL_MS  = 60000; // throttle DO-storage persistence (snapshot + sourceState) to ~1/min instead of every 3s tick — they're cold-start-only, so writing them every tick just burned billable DO storage writes (millions/mo)
 const CONFIRMATIONS_NEEDED = 3;     // ~9 s hysteresis before flipping state
 const GROUND_ALT_FT        = 100;
 const GROUND_GS_KT         = 30;
@@ -283,6 +284,7 @@ export class TrackerDO {
     this.state        = state;
     this.env          = env;
     this.initialized  = false;
+    this.lastPersistMs = 0;     // throttle: last time snapshot+sourceState were persisted to DO storage (see PERSIST_INTERVAL_MS)
     // Shared live snapshot — populated by alarm(), served by the /live route.
     // Stored both in-memory (hot path) AND Durable Storage (cold-start
     // resilience). Without storage persistence, a worker re-deploy or DO
@@ -593,8 +595,14 @@ export class TrackerDO {
       const okResults = perSource.filter(r => r.status === "ok");
       const mergedAc  = mergeAircraft(okResults);
 
-      // Persist per-source backoff state (pollSource mutated it on 429s).
-      await this.state.storage.put("sourceState", this.sourceState);
+      // Throttle the two persistence writes (sourceState + snapshot) to at most
+      // once per PERSIST_INTERVAL_MS instead of every 3s tick. They're read ONLY
+      // on cold-start (constructor hydration) — the live DO always uses the
+      // in-memory copies, which are current every tick. Persisting unchanged
+      // state every 3s was ~2 DO-storage writes/tick → millions/mo past the free
+      // tier. (setAlarm at the top is the only write that MUST run every tick.)
+      const persistNow = Date.now() - this.lastPersistMs >= PERSIST_INTERVAL_MS;
+      if (persistNow) await this.state.storage.put("sourceState", this.sourceState);
 
       // Store snapshot + per-source health for /live consumers + verification.
       this.snapshot = {
@@ -609,17 +617,19 @@ export class TrackerDO {
           error:     r.error     || null,
         })),
       };
-      // Persist for cold-start resilience — but NEVER let it abort the alarm.
-      // DO storage caps each value at 128 KB; during heavy daytime traffic the
-      // snapshot (400+ aircraft ≈ 300 KB) exceeds that and put() throws.
-      // Unguarded, that throw aborted the alarm BEFORE the flight-logging loop,
-      // silently freezing ALL history while live polling (the in-memory
-      // snapshot, set above) kept working. Logging is the priority; persistence
-      // is optional, so swallow the error and move on.
-      try {
-        await this.state.storage.put("snapshot", this.snapshot);
-      } catch (e) {
-        console.error("snapshot persist skipped (likely >128KB DO-storage limit):", e && e.message ? e.message : e);
+      // Persist the snapshot (cold-start resilience) on the SAME throttle, and
+      // NEVER let it abort the alarm: DO storage caps values at 128 KB; in heavy
+      // daytime traffic the snapshot (400+ aircraft ≈ 300 KB) exceeds that and
+      // put() throws. Unguarded, that throw aborted the alarm BEFORE the
+      // flight-logging loop and silently froze ALL history (the in-memory
+      // snapshot above still served /live fine). Logging is the priority.
+      if (persistNow) {
+        try {
+          await this.state.storage.put("snapshot", this.snapshot);
+        } catch (e) {
+          console.error("snapshot persist skipped (likely >128KB DO-storage limit):", e && e.message ? e.message : e);
+        }
+        this.lastPersistMs = Date.now();
       }
 
       // Flight logger — ONE call per fleet aircraft per tick, from the SINGLE
